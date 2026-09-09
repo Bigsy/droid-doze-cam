@@ -3,8 +3,11 @@
 import argparse
 import json
 from pathlib import Path
+import queue
+import re
 import signal
 import subprocess
+import threading
 import time
 
 parser = argparse.ArgumentParser(description=__doc__)
@@ -16,7 +19,7 @@ checks = 0
 def run(arguments, expected=0):
     result = subprocess.run([args.cli, *arguments], capture_output=True, text=True, timeout=30)
     if result.returncode != expected:
-        raise AssertionError(f"{arguments}: exit {result.returncode}, expected {expected}: {result.stderr}")
+        raise AssertionError(f"{arguments}: exit {result.returncode}, expected {expected}: {result.stderr}\n{result.stdout}")
     return result
 
 
@@ -43,7 +46,9 @@ passed("missing optional Syphon framework fails before capture")
 for size, rate, angle, fit in [("640x480", "15", "0", "fit"),
                               ("1280x720", "30", "90", "fit"),
                               ("1920x1080", "60", "270", "fill")]:
-    result = run(["probe", "--source", "test", "--duration", "1", "--size", size,
+    # A fresh runner may spend more than one second initializing its render pipeline.
+    # Keep a bounded capture interval and still require actual processed frames.
+    result = run(["probe", "--source", "test", "--duration", "5", "--size", size,
                   "--fps", rate, "--rotate", angle, "--mirror", "--fit", fit, "--json"])
     report = json.loads(result.stdout)
     assert report["source"] == "test" and report["outputSize"] == size
@@ -54,16 +59,46 @@ for size, rate, angle, fit in [("640x480", "15", "0", "fit"),
 
 process = subprocess.Popen([args.cli, "probe", "--source", "test", "--duration", "60", "--json"],
                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+progress = queue.Queue()
+stderr_lines = []
+
+
+def read_progress():
+    for line in process.stderr:
+        stderr_lines.append(line)
+        progress.put(line)
+    progress.put(None)
+
+
+reader = threading.Thread(target=read_progress, daemon=True)
+reader.start()
 try:
-    time.sleep(2)
+    # Exercise cancellation during capture, after the process confirms its first output.
+    deadline = time.monotonic() + 20
+    while True:
+        remaining = deadline - time.monotonic()
+        assert remaining > 0, "Timed out waiting for processed frames: " + "".join(stderr_lines)
+        try:
+            line = progress.get(timeout=remaining)
+        except queue.Empty:
+            raise AssertionError("No capture progress before deadline: " + "".join(stderr_lines)) from None
+        assert line is not None, "Capture exited before processing frames: " + "".join(stderr_lines)
+        match = re.search(r"\bprocessed=(\d+)", line)
+        if match and int(match.group(1)) > 0:
+            break
     process.send_signal(signal.SIGINT)
-    stdout, stderr = process.communicate(timeout=10)
-    assert process.returncode == 0, stderr
+    process.wait(timeout=10)
+    reader.join(timeout=1)
+    stdout = process.stdout.read()
+    assert process.returncode == 0, "".join(stderr_lines)
     assert json.loads(stdout)["processed"] > 0
 finally:
     if process.poll() is None:
         process.kill()
-        process.communicate()
+        process.wait(timeout=10)
+    reader.join(timeout=1)
+    process.stdout.close()
+    process.stderr.close()
 passed("SIGINT stops capture and returns final JSON")
 
 report = json.loads(run(["doctor", "--json"]).stdout)
