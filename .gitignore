@@ -1,0 +1,17 @@
+.build/
+.build-*/
+dist/
+.swiftpm/
+.DS_Store
+__pycache__/
+*.p12
+*.provisionprofile
+*.mobileprovision
+*.key
+.env
+
+docs/test-tools/WebcamValidation/browser-evidence.jsonl
+
+# Keep local device reports and machine-specific build output out of commits.
+docs/test-logs/
+artifacts/

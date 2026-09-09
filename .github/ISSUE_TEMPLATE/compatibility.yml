@@ -1,0 +1,36 @@
+name: Device compatibility / 机型验证
+description: Expand the verified phone and receiving-app matrix.
+title: "[Device] "
+body:
+  - type: input
+    id: device
+    attributes:
+      label: Phone model and OS / 手机型号和系统
+    validations:
+      required: true
+  - type: input
+    id: host
+    attributes:
+      label: Mac, macOS and commit / 电脑与版本
+    validations:
+      required: true
+  - type: dropdown
+    id: path
+    attributes:
+      label: Capture path / 接入路径
+      options:
+        - Android USB ADB
+        - Android native UVC
+        - iPhone Continuity Camera
+    validations:
+      required: true
+  - type: textarea
+    id: results
+    attributes:
+      label: Actual results / 实际结果
+      description: Command without serials, source/output sizes, receiving app/version, image content and direction, normal stop, restart and duration. Mark untested items explicitly.
+    validations:
+      required: true
+  - type: markdown
+    attributes:
+      value: "A frame count alone does not establish usable video. Keep camera footage and sensitive device identifiers private."

@@ -1,0 +1,26 @@
+name: Bug report / 问题反馈
+description: Report reproducible behavior with the affected version and capture path.
+title: "[Bug] "
+body:
+  - type: markdown
+    attributes:
+      value: "Remove device serials, private paths and credentials from logs. Do not attach private camera footage."
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment / 环境
+      description: Commit or version, Mac architecture/macOS, phone model/OS, OBS and receiving app versions.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction / 复现步骤
+      description: Exact command with private identifiers removed, steps, expected result and actual result.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence / 证据
+      description: Relevant redacted errors and whether the native preview and independent camera receiver show real moving video.
