@@ -57,7 +57,7 @@ final class VirtualCameraWriter {
     }
     init(size: VideoSize, fps: Int) throws {
         guard let device = try Self.findDevice() else {
-            throw PhoneCamError.message("PhoneCam camera extension is unavailable. Run phonecam install-extension from /Applications/PhoneCam.app, approve it in System Settings, then run phonecam status.")
+            throw PhoneCamError.message("USB WakeCam camera extension is unavailable. Run phonecam install-extension from /Applications/USBWakeCam.app, approve it in System Settings, then run phonecam status.")
         }
         deviceID = device; self.fps = fps
         let streams = try CMIOProperties.ids(device, UInt32(kCMIODevicePropertyStreams))

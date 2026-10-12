@@ -70,7 +70,7 @@ enum Commands {
                 signing:signing)
             if c.json { try printJSON(report) }
             else {
-                print("PhoneCam \(report.version) | \(architecture) | \(report.macOS)")
+                print("USB WakeCam \(report.version) | \(architecture) | \(report.macOS)")
                 print("Bundle: \(report.bundle)\nCamera permission: \(permissionText)\nMetal: \(report.metalAvailable)\nVirtual camera visible: \(visible)")
                 print("\n\(extensions)\n\nAndroid server: \(report.androidServer)")
                 if c.command == "doctor" { print("\nCode signature:\n\(signing)"); try printJSON(report.devices) }
@@ -79,6 +79,7 @@ enum Commands {
             let report = try CaptureRuntime.run(c,cancellation:cancellation,onProcessedFrame:onProcessedFrame)
             if c.json { try printJSON(report) }
             else { print(String(format:"Stopped. received=%llu processed=%llu elapsed=%.2fs averageInput=%.2ffps",report.received,report.processed,report.elapsedSeconds,report.receivedFPS)) }
+        case "serve": try OnDemandService.run(c, cancellation: cancellation)
         default: throw PhoneCamError.message("Unsupported command.")
         }
     }
@@ -136,19 +137,20 @@ struct PhoneCamMain {
         app.run()
     }
     static let help = """
-    PhoneCam \(Constants.version) — native USB phone camera bridge for macOS 13+
+    USB WakeCam \(Constants.version) — native USB phone camera bridge for macOS 13+
 
-    phonecam devices [--json]                  List AVFoundation cameras and authorized/unauthorized USB ADB phones
-    phonecam doctor [--json]                   Inspect permissions, code signatures, GPU and USB prerequisites
-    phonecam status [--json]                   Inspect extension registration and virtual camera visibility
-    phonecam install-extension                Activate the signed, bundled camera system extension (approval required)
-    phonecam uninstall-extension              Request extension deactivation (may require a reboot)
-    phonecam run [OPTIONS]                     Publish to "\(Constants.cameraName)"; Ctrl+C stops
-    phonecam probe [OPTIONS]                   Capture/process without publishing (10 seconds by default)
-    phonecam preview [OPTIONS]                 Show processed video in a native window; close window or Ctrl+C to stop
-    phonecam version
+    usb-wakecam devices [--json]               List AVFoundation cameras and authorized/unauthorized USB ADB phones
+    usb-wakecam doctor [--json]                Inspect permissions, code signatures, GPU and USB prerequisites
+    usb-wakecam status [--json]                Inspect extension registration and virtual camera visibility
+    usb-wakecam install-extension             Activate the signed, bundled camera system extension (approval required)
+    usb-wakecam uninstall-extension           Request extension deactivation (may require a reboot)
+    usb-wakecam run [OPTIONS]                  Publish to "\(Constants.cameraName)"; Ctrl+C stops
+    usb-wakecam serve [OPTIONS]                Start USB capture only while a Mac app uses the camera
+    usb-wakecam probe [OPTIONS]                Capture/process without publishing (10 seconds by default)
+    usb-wakecam preview [OPTIONS]              Show processed video in a native window; close window or Ctrl+C to stop
+    usb-wakecam version
 
-    OPTIONS (run/probe/preview)
+    OPTIONS (run/probe/preview/serve)
       --source auto|continuity|uvc|android|test  Default: auto; never automatically selects another virtual camera
       --device ID_OR_NAME                      Native selector; probe/preview may explicitly select PhoneCam for testing
       --serial USB_SERIAL                      Android USB selector; wireless ADB is rejected
@@ -169,19 +171,21 @@ struct PhoneCamMain {
       --json                                   Machine-readable final report; progress/errors go to stderr
       --adb PATH                               Override adb executable
       --server PATH                            Override pinned, SHA-256-verified scrcpy server
+      --demand-dir PATH                        serve development override for the shared demand directory
 
     Examples:
-      phonecam run --source continuity
-      phonecam run --source uvc --device "USB Camera"
-      phonecam run --source android --facing back --size 1920x1080 --fps 30 --bitrate 12M
-      phonecam run --source test
-      phonecam preview --source android --require-hardware
-      phonecam preview --source android --require-hardware --syphon
-      phonecam probe --device "PhoneCam USB Camera" --duration 5
+      usb-wakecam run --source continuity
+      usb-wakecam run --source uvc --device "USB Camera"
+      usb-wakecam run --source android --facing back --size 1920x1080 --fps 30 --bitrate 12M
+      usb-wakecam run --source test
+      usb-wakecam preview --source android --require-hardware
+      usb-wakecam preview --source android --require-hardware --syphon
+      usb-wakecam serve --source android --serial USB_SERIAL --size 1920x1080 --fps 60
+      usb-wakecam probe --device "USB WakeCam" --duration 5
 
     iPhone: Continuity Camera requirements apply; macOS controls USB/wireless routing.
     Android: native USB Webcam when supported, otherwise Android 12+ / USB debugging / ADB.
-    Native cameras can be used directly by meeting apps; run requires the PhoneCam extension.
+    Native cameras can be used directly by meeting apps; run requires our own signed extension.
     No audio device, recording, cloud relay, kernel extension or SIP modification.
     """
 }

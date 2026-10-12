@@ -1,3 +1,23 @@
+# USB WakeCam prototype
+
+This is a local fork of [PhoneCam](https://github.com/wybaby168/phonecam) for a USB-connected Samsung phone. The USB camera stream works while the phone is locked and its display stays off.
+
+## USB WakeCam camera prototype
+
+This fork's own camera extension keeps the phone locked and its display off while a Mac app uses the camera. When the last Mac camera stream closes, it stops the USB video stream. If the phone's lock screen lit up during the call, it turns that screen off; it leaves an unlocked phone alone.
+
+The camera extension publishes a short-lived demand signal in the shared App Group. `phonecam serve` watches that signal and starts the existing ADB/scrcpy USB capture and Core Media I/O frame sink on demand. A stale signal expires after four seconds so a crashed extension cannot leave capture running. The default capture target is 1080p at 60 fps and 20 Mbps. The phone was probed at 1080p/60 and 4K/60 over USB; the current Mac extension advertises up to 1080p/60, and end-to-end app use still needs validation.
+
+**Status:** The host app and camera extension are signed with the owner's Apple Development team and installed. macOS has approved the extension, although the camera device disappeared after a hot extension replacement; end-to-end use by a Mac camera app is still being validated. USB capture from the S23 Ultra has worked at 1080p/60 while Android remained in `Dozing`, and the core and CLI tests pass. See [the signing steps for this fork](docs/WAKECAM_SIGNING.md). No phone app or root access is needed.
+
+For a development build, run `./scripts/build.sh --unsigned`. Once the app and extension are correctly signed, run `./scripts/install.sh`, activate the extension with `usb-wakecam install-extension`, then run `./scripts/install-service.sh USB_SERIAL` to start the on-demand service at login. `./scripts/uninstall-service.sh` removes the login service. `--demand-dir PATH` is available for local testing of the demand signal without an installed extension. The build uses the independent bundle ID `com.hedworth.usbwakecam` and camera IDs, so it does not replace upstream PhoneCam.
+
+On this Mac Xcode has generated development provisioning profiles for the signing team. `scripts/build.sh --signed` validates both profiles and produces `dist/USBWakeCam.app`. Increase `BUILD_NUMBER` for each installed extension update. The signed app is installed at `/Applications/USBWakeCam.app`.
+
+---
+
+## Upstream PhoneCam README
+
 <p align="center">
   <img src="assets/phonecam.png" alt="PhoneCam icon" width="128" />
 </p>

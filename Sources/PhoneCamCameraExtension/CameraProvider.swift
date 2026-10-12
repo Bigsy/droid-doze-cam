@@ -8,7 +8,7 @@ import os
 import PhoneCamCore
 import PhoneCamMedia
 
-private let cameraLog = Logger(subsystem: "dev.flyfish.phonecam", category: "CameraExtension")
+private let cameraLog = Logger(subsystem: "com.hedworth.usbwakecam", category: "CameraExtension")
 
 /// All device, stream-property, rendering and asynchronous-consumption state is serialized here.
 final class CameraProvider: NSObject, CMIOExtensionProviderSource {
@@ -29,7 +29,7 @@ final class CameraProvider: NSObject, CMIOExtensionProviderSource {
     }
     var availableProperties: Set<CMIOExtensionProperty> { [.providerManufacturer] }
     func providerProperties(forProperties properties: Set<CMIOExtensionProperty>) throws -> CMIOExtensionProviderProperties {
-        let p = CMIOExtensionProviderProperties(dictionary: [:]); p.manufacturer = "PhoneCam"; return p
+        let p = CMIOExtensionProviderProperties(dictionary: [:]); p.manufacturer = "USB WakeCam"; return p
     }
     func setProviderProperties(_ properties: CMIOExtensionProviderProperties) throws {}
     func connect(to client: CMIOExtensionClient) throws {}
@@ -53,8 +53,13 @@ final class CameraDevice: NSObject, CMIOExtensionDeviceSource {
     private var converted: CVPixelBuffer?
     private var clock = MonotonicClock()
     private var lastErrorLog: Double = 0
+    private let demandFile: CameraDemandFile?
+    private var lastDemandWrite: Double = 0
     init(owner: CameraProvider) throws {
         self.owner = owner; renderer = try FrameRenderer(size: .hd)
+        if let group = Bundle.main.object(forInfoDictionaryKey: "PhoneCamAppGroup") as? String {
+            demandFile = try? CameraDemandFile(appGroup: group)
+        } else { demandFile = nil }
         super.init()
         _ = try renderer.black() // Reserve an immutable privacy frame before client buffers can fill the pool.
         device = CMIOExtensionDevice(localizedName: Constants.cameraName, deviceID: UUID(uuidString: Constants.deviceUUID)!,
@@ -66,7 +71,7 @@ final class CameraDevice: NSObject, CMIOExtensionDeviceSource {
     var availableProperties: Set<CMIOExtensionProperty> { [.deviceTransportType, .deviceModel] }
     func deviceProperties(forProperties properties: Set<CMIOExtensionProperty>) throws -> CMIOExtensionDeviceProperties {
         let p = CMIOExtensionDeviceProperties(dictionary: [:]); p.transportType = kIOAudioDeviceTransportTypeVirtual
-        p.model = "PhoneCam USB Video Bridge"; return p
+        p.model = "USB WakeCam Video Bridge"; return p
     }
     func setDeviceProperties(_ properties: CMIOExtensionDeviceProperties) throws {}
     func outputFormatChanged(index: Int, duration: CMTime) throws {
@@ -84,10 +89,20 @@ final class CameraDevice: NSObject, CMIOExtensionDeviceSource {
         timer.schedule(deadline: .now(), repeating: duration.seconds, leeway: .milliseconds(1))
         timer.setEventHandler { [weak self] in self?.emit() }; sourceTimer = timer; timer.resume()
     }
-    func startOutput() { sourceUsers += 1; if sourceUsers == 1 { scheduleSource(duration: output.duration) } }
+    private func publishDemand(_ active: Bool) {
+        do { try demandFile?.publish(active: active); lastDemandWrite = ProcessInfo.processInfo.systemUptime }
+        catch { cameraLog.error("Camera demand signal: \(String(describing: error), privacy: .public)") }
+    }
+    func startOutput() {
+        sourceUsers += 1
+        if sourceUsers == 1 { publishDemand(true); scheduleSource(duration: output.duration) }
+    }
     func stopOutput() {
         sourceUsers = max(0, sourceUsers - 1)
-        if sourceUsers == 0 { sourceTimer?.cancel(); sourceTimer = nil; converted = nil; convertedGeneration = .max }
+        if sourceUsers == 0 {
+            sourceTimer?.cancel(); sourceTimer = nil; converted = nil; convertedGeneration = .max
+            publishDemand(false)
+        }
     }
     private func report(_ error: Error) {
         let now = ProcessInfo.processInfo.systemUptime
@@ -95,6 +110,7 @@ final class CameraDevice: NSObject, CMIOExtensionDeviceSource {
     }
     private func emit() {
         guard sourceUsers > 0 else { return }
+        if ProcessInfo.processInfo.systemUptime - lastDemandWrite >= 1 { publishDemand(true) }
         autoreleasepool {
             do {
                 let pixel: CVPixelBuffer
@@ -126,6 +142,10 @@ final class CameraDevice: NSObject, CMIOExtensionDeviceSource {
     }
     func disconnected(_ client: CMIOExtensionClient) {
         if input.client?.clientID == client.clientID { sinkUsers = 1; stopInput() }
+        if sourceUsers > 0 && output.stream.streamingClients.isEmpty {
+            sourceUsers = 1
+            stopOutput()
+        }
     }
     private func consume(client: CMIOExtensionClient, generation: UInt64) {
         guard sinkUsers > 0, generation == sinkGeneration else { return }
@@ -170,7 +190,7 @@ final class CameraStream: NSObject, CMIOExtensionStreamSource {
                 maxFrameDuration: CMTime(value: 1, timescale: 15), minFrameDuration: CMTime(value: 1, timescale: 60), validFrameDurations: nil)
         }
         super.init()
-        stream = CMIOExtensionStream(localizedName: sink ? "PhoneCam Producer" : "PhoneCam Video",
+        stream = CMIOExtensionStream(localizedName: sink ? "USB WakeCam Producer" : "USB WakeCam Video",
             streamID: UUID(uuidString: sink ? Constants.sinkUUID : Constants.sourceUUID)!, direction: sink ? .sink : .source,
             clockType: .hostTime, source: self)
     }
@@ -201,20 +221,27 @@ final class CameraStream: NSObject, CMIOExtensionStreamSource {
     private func trusted(_ candidate: CMIOExtensionClient) -> Bool {
         guard let expectedID = Bundle.main.object(forInfoDictionaryKey: "PhoneCamHostBundleIdentifier") as? String,
               let team = Bundle.main.object(forInfoDictionaryKey: "PhoneCamTeamIdentifier") as? String,
-              team.count == 10, candidate.signingID == expectedID else { return false }
-        // Do not trust a caller's claimed PID or bundle ID alone; require an Apple-issued signature from our team.
+              team.count == 10 else { return false }
+        // CoreMediaIO may report signingID as "unknown" for a CLI inside a signed app.
+        // Verify the actual process signature instead of trusting that reported string.
         var guest: SecCode?, requirement: SecRequirement?
         let attributes = [kSecGuestAttributePid as String: NSNumber(value: candidate.pid)] as CFDictionary
-        guard SecCodeCopyGuestWithAttributes(nil, attributes, SecCSFlags(rawValue: 0), &guest) == errSecSuccess, let guest else { return false }
+        let guestStatus = SecCodeCopyGuestWithAttributes(nil, attributes, SecCSFlags(rawValue: 0), &guest)
+        guard guestStatus == errSecSuccess, let guest else {
+            cameraLog.error("Cannot inspect producer PID \(candidate.pid): \(guestStatus)")
+            return false
+        }
         let text = "anchor apple generic and certificate leaf[subject.OU] = \"\(team)\" and identifier \"\(expectedID)\""
         guard SecRequirementCreateWithString(text as CFString, SecCSFlags(rawValue: 0), &requirement) == errSecSuccess, let requirement else { return false }
-        return SecCodeCheckValidity(guest, SecCSFlags(rawValue: 0), requirement) == errSecSuccess
+        let checkStatus = SecCodeCheckValidity(guest, SecCSFlags(rawValue: 0), requirement)
+        if checkStatus != errSecSuccess { cameraLog.error("Producer signature check failed: \(checkStatus)") }
+        return checkStatus == errSecSuccess
     }
     func authorizedToStartStream(for candidate: CMIOExtensionClient) -> Bool {
         camera.owner.sync {
             guard sink else { return true } // Camera consumers are additionally subject to the OS's camera permission model.
             guard client == nil || client?.clientID == candidate.clientID, trusted(candidate) else {
-                cameraLog.error("Rejected producer; use the correctly signed PhoneCam host app."); return false
+                cameraLog.error("Rejected producer; use the correctly signed USB WakeCam host app."); return false
             }
             client = candidate; return true
         }

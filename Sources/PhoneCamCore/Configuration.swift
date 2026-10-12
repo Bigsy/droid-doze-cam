@@ -6,12 +6,12 @@ public enum PhoneCamError: Error, LocalizedError, Equatable {
 }
 
 public enum Constants {
-    public static let version = "1.0.0"
-    public static let cameraName = "PhoneCam USB Camera"
+    public static let version = "0.1.0"
+    public static let cameraName = "USB WakeCam"
     // Stable across restarts and updates; meeting applications persist these identifiers.
-    public static let deviceUUID = "B49C1F8A-61FA-448D-AC50-A150BF53FC01"
-    public static let sourceUUID = "B49C1F8A-61FA-448D-AC50-A150BF53FC02"
-    public static let sinkUUID = "B49C1F8A-61FA-448D-AC50-A150BF53FC03"
+    public static let deviceUUID = "6BC32819-3803-4B4E-8B86-094FCBA5CF70"
+    public static let sourceUUID = "4DBF4485-A15D-40B5-B334-EA95CB93663D"
+    public static let sinkUUID = "96F9168F-72BD-4A90-91BA-3C4C398629AC"
     public static let scrcpyVersion = "3.3.4"
     public static let scrcpySHA256 = "8588238c9a5a00aa542906b6ec7e6d5541d9ffb9b5d0f6e1bc0e365e2303079e"
     public static let maxPacketBytes = 16 * 1024 * 1024
@@ -63,6 +63,7 @@ public struct Configuration: Equatable, Sendable {
     public var requireHardware = false
     public var syphon = false
     public var syphonFrameworkPath: String?
+    public var demandDirectory: String?
 
     public init() {}
     public static func parse(_ arguments: [String]) throws -> Self {
@@ -71,7 +72,7 @@ public struct Configuration: Equatable, Sendable {
         if args.first == "--help" || args.first == "-h" { return c }
         if args.first == "--version" { c.command = "version"; return c }
         guard let command = args.first else { return c }
-        let commands = ["help", "version", "devices", "doctor", "run", "probe", "preview", "install-extension", "uninstall-extension", "status"]
+        let commands = ["help", "version", "devices", "doctor", "run", "probe", "preview", "serve", "install-extension", "uninstall-extension", "status"]
         guard commands.contains(command) else { throw PhoneCamError.message("Unknown command '\(command)'. Run phonecam help.") }
         c.command = args.removeFirst()
         var supplied = Set<String>()
@@ -128,6 +129,7 @@ public struct Configuration: Equatable, Sendable {
             case "--require-hardware": c.requireHardware = true
             case "--syphon": c.syphon = true
             case "--syphon-framework": c.syphonFrameworkPath = value
+            case "--demand-dir": c.demandDirectory = value
             default: throw PhoneCamError.message("Unknown option \(key). Run phonecam help.")
             }
         }
@@ -139,9 +141,20 @@ public struct Configuration: Equatable, Sendable {
             throw PhoneCamError.message("--syphon is available with preview or probe; run uses the PhoneCam system extension.")
         }
         if c.syphonFrameworkPath != nil && !c.syphon { throw PhoneCamError.message("--syphon-framework requires --syphon.") }
+        if c.demandDirectory != nil && c.command != "serve" { throw PhoneCamError.message("--demand-dir requires serve.") }
+        if c.command == "serve" {
+            guard !["--device", "--syphon", "--syphon-framework", "--duration", "--json"].contains(where: supplied.contains) else {
+                throw PhoneCamError.message("serve accepts Android USB capture options only.")
+            }
+            guard c.source == .auto || c.source == .android else { throw PhoneCamError.message("serve requires --source android.") }
+            c.source = .android
+            if !supplied.contains("--size") { c.size = .fullHD }
+            if !supplied.contains("--fps") { c.fps = 60 }
+            if !supplied.contains("--bitrate") { c.bitrate = 20_000_000 }
+        }
         let streaming = Set(["--source","--device","--serial","--size","--fps","--bitrate","--facing","--camera-id","--android-size","--rotate","--fit","--mirror","--no-reconnect","--duration","--require-hardware","--syphon","--syphon-framework"])
-        if !["run", "probe", "preview"].contains(c.command), !supplied.intersection(streaming).isEmpty {
-            throw PhoneCamError.message("Capture options are only accepted by run, probe, and preview.")
+        if !["run", "probe", "preview", "serve"].contains(c.command), !supplied.intersection(streaming).isEmpty {
+            throw PhoneCamError.message("Capture options are only accepted by run, probe, preview, and serve.")
         }
         return c
     }

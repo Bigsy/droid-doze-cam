@@ -26,6 +26,29 @@ final class ConfigurationTests: XCTestCase {
         }
     }
     func testVideoSize() throws { XCTAssertEqual(try VideoSize("1280X720"),.hd); XCTAssertThrowsError(try VideoSize("1279x720")); XCTAssertThrowsError(try VideoSize("1280x720x2")) }
+    func testServeDefaultsToUSBAndRejectsPreviewOptions() throws {
+        let c = try Configuration.parse(["serve", "--serial", "USB123"])
+        XCTAssertEqual(c.source, .android); XCTAssertEqual(c.size, .fullHD); XCTAssertEqual(c.fps, 60)
+        XCTAssertEqual(c.bitrate, 20_000_000)
+        XCTAssertThrowsError(try Configuration.parse(["serve", "--syphon"]))
+        XCTAssertThrowsError(try Configuration.parse(["probe", "--demand-dir", "/tmp"]))
+    }
+}
+
+final class CameraDemandTests: XCTestCase {
+    func testLeaseExpiresAfterExtensionStopsOrCrashes() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let file = CameraDemandFile(directory: directory)
+        XCTAssertFalse(file.current())
+        try file.publish(active: true)
+        XCTAssertTrue(file.current())
+        let active = try JSONDecoder().decode(CameraDemand.self, from: Data(contentsOf: file.url))
+        XCTAssertFalse(file.current(at: active.updatedAt + 5))
+        try file.publish(active: false)
+        XCTAssertFalse(file.current())
+    }
 }
 final class ProtocolTests: XCTestCase {
     private func packet(_ flags: UInt64, _ size: UInt32) -> Data { var f = flags.bigEndian; var s = size.bigEndian; var d = Data(bytes:&f,count:8); d.append(Data(bytes:&s,count:4)); return d }

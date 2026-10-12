@@ -2,7 +2,7 @@ import Foundation
 import Darwin
 import PhoneCamCore
 
-func log(_ message: String) { FileHandle.standardError.write(Data(("[phonecam] " + message + "\n").utf8)) }
+func log(_ message: String) { FileHandle.standardError.write(Data(("[usb-wakecam] " + message + "\n").utf8)) }
 
 struct CommandResult { let status: Int32; let text: String }
 private final class BoundedOutput: @unchecked Sendable {
@@ -59,7 +59,7 @@ enum ProcessRunner {
 final class InstanceLock {
     private var fd: Int32 = -1
     init() throws {
-        let directory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/PhoneCam",isDirectory:true)
+        let directory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/USBWakeCam",isDirectory:true)
         try FileManager.default.createDirectory(at:directory,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
         let path = directory.appendingPathComponent("capture.lock").path
         fd = open(path,O_RDWR|O_CREAT|O_CLOEXEC|O_NOFOLLOW,0o600)

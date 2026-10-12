@@ -75,7 +75,7 @@ enum NativeDevices {
 
 final class NativeCapture: NSObject, CaptureSource, AVCaptureVideoDataOutputSampleBufferDelegate {
     private var callback: ((CVPixelBuffer) -> Void)?
-    private let queue = DispatchQueue(label:"dev.flyfish.phonecam.native",qos:.userInteractive)
+    private let queue = DispatchQueue(label:"com.hedworth.usbwakecam.native",qos:.userInteractive)
     private let arrival = LatestValue<Double>()
     private let errorMessage = LatestValue<String>()
     func run(configuration c: Configuration, cancellation: Cancellation, onFrame: @escaping (CVPixelBuffer) -> Void) throws {

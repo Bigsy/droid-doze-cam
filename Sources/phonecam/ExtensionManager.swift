@@ -10,7 +10,7 @@ final class ExtensionManager: NSObject, OSSystemExtensionRequestDelegate {
     func submit() throws {
         let bundle = Bundle.main
         guard bundle.bundleURL.path.hasPrefix("/Applications/"), bundle.bundleURL.pathExtension == "app" else {
-            throw PhoneCamError.message("System extension requests must originate from /Applications/PhoneCam.app. Install the built app first; invoke its bundled CLI, not .build/release/phonecam.")
+            throw PhoneCamError.message("System extension requests must originate from /Applications/USBWakeCam.app. Install the built app first; invoke its bundled CLI, not .build/release/phonecam.")
         }
         let directory = bundle.bundleURL.appendingPathComponent("Contents/Library/SystemExtensions")
         let extensions = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys:nil).filter { $0.pathExtension == "systemextension" }
@@ -20,7 +20,7 @@ final class ExtensionManager: NSObject, OSSystemExtensionRequestDelegate {
         OSSystemExtensionManager.shared.submitRequest(r)
     }
     func requestNeedsUserApproval(_ request: OSSystemExtensionRequest) {
-        log("macOS requires your approval. Follow its notification and enable the PhoneCam camera extension in System Settings. The exact location depends on your macOS version (Privacy & Security / Login Items & Extensions / Camera Extensions).")
+        log("macOS requires your approval. Follow its notification and enable the USB WakeCam camera extension in System Settings. The exact location depends on your macOS version (Privacy & Security / Login Items & Extensions / Camera Extensions).")
     }
     func request(_ request: OSSystemExtensionRequest, actionForReplacingExtension existing: OSSystemExtensionProperties, withExtension replacement: OSSystemExtensionProperties) -> OSSystemExtensionRequest.ReplacementAction {
         log("Replacing camera extension \(existing.bundleShortVersion) with \(replacement.bundleShortVersion).")
