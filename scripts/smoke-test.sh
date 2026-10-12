@@ -1,7 +1,7 @@
 #!/bin/bash
 # Requires the SIGNED, INSTALLED, APPROVED extension on a real Mac.
 set -euo pipefail
-CLI=/Applications/USBWakeCam.app/Contents/MacOS/phonecam
+CLI=/Applications/DroidDozeCam.app/Contents/MacOS/phonecam
 [[ "$(uname -s)" == Darwin && -x "$CLI" ]] || { echo "Install and approve PhoneCam on a Mac first." >&2; exit 1; }
 DIR="$(mktemp -d "${TMPDIR:-/tmp}/phonecam-smoke.XXXXXX")"
 PID=""
@@ -14,7 +14,7 @@ trap cleanup EXIT
 PID=$!
 sleep 2
 if ! kill -0 "$PID" 2>/dev/null; then cat "$DIR/producer.log" >&2; echo "Producer failed." >&2; exit 1; fi
-if ! "$CLI" probe --device "USB WakeCam" --duration 5 --json > "$DIR/consumer.json"; then
+if ! "$CLI" probe --device "DroidDozeCam" --duration 5 --json > "$DIR/consumer.json"; then
   cat "$DIR/producer.log" >&2; exit 1
 fi
 wait "$PID"

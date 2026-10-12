@@ -7,7 +7,7 @@ public enum PhoneCamError: Error, LocalizedError, Equatable {
 
 public enum Constants {
     public static let version = "0.1.0"
-    public static let cameraName = "USB WakeCam"
+    public static let cameraName = "DroidDozeCam"
     // Stable across restarts and updates; meeting applications persist these identifiers.
     public static let deviceUUID = "6BC32819-3803-4B4E-8B86-094FCBA5CF70"
     public static let sourceUUID = "4DBF4485-A15D-40B5-B334-EA95CB93663D"

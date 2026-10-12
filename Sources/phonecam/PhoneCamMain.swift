@@ -70,7 +70,7 @@ enum Commands {
                 signing:signing)
             if c.json { try printJSON(report) }
             else {
-                print("USB WakeCam \(report.version) | \(architecture) | \(report.macOS)")
+                print("DroidDozeCam \(report.version) | \(architecture) | \(report.macOS)")
                 print("Bundle: \(report.bundle)\nCamera permission: \(permissionText)\nMetal: \(report.metalAvailable)\nVirtual camera visible: \(visible)")
                 print("\n\(extensions)\n\nAndroid server: \(report.androidServer)")
                 if c.command == "doctor" { print("\nCode signature:\n\(signing)"); try printJSON(report.devices) }
@@ -137,18 +137,18 @@ struct PhoneCamMain {
         app.run()
     }
     static let help = """
-    USB WakeCam \(Constants.version) — native USB phone camera bridge for macOS 13+
+    DroidDozeCam \(Constants.version) — native USB phone camera bridge for macOS 13+
 
-    usb-wakecam devices [--json]               List AVFoundation cameras and authorized/unauthorized USB ADB phones
-    usb-wakecam doctor [--json]                Inspect permissions, code signatures, GPU and USB prerequisites
-    usb-wakecam status [--json]                Inspect extension registration and virtual camera visibility
-    usb-wakecam install-extension             Activate the signed, bundled camera system extension (approval required)
-    usb-wakecam uninstall-extension           Request extension deactivation (may require a reboot)
-    usb-wakecam run [OPTIONS]                  Publish to "\(Constants.cameraName)"; Ctrl+C stops
-    usb-wakecam serve [OPTIONS]                Start USB capture only while a Mac app uses the camera
-    usb-wakecam probe [OPTIONS]                Capture/process without publishing (10 seconds by default)
-    usb-wakecam preview [OPTIONS]              Show processed video in a native window; close window or Ctrl+C to stop
-    usb-wakecam version
+    droiddozecam devices [--json]               List AVFoundation cameras and authorized/unauthorized USB ADB phones
+    droiddozecam doctor [--json]                Inspect permissions, code signatures, GPU and USB prerequisites
+    droiddozecam status [--json]                Inspect extension registration and virtual camera visibility
+    droiddozecam install-extension             Activate the signed, bundled camera system extension (approval required)
+    droiddozecam uninstall-extension           Request extension deactivation (may require a reboot)
+    droiddozecam run [OPTIONS]                  Publish to "\(Constants.cameraName)"; Ctrl+C stops
+    droiddozecam serve [OPTIONS]                Start USB capture only while a Mac app uses the camera
+    droiddozecam probe [OPTIONS]                Capture/process without publishing (10 seconds by default)
+    droiddozecam preview [OPTIONS]              Show processed video in a native window; close window or Ctrl+C to stop
+    droiddozecam version
 
     OPTIONS (run/probe/preview/serve)
       --source auto|continuity|uvc|android|test  Default: auto; never automatically selects another virtual camera
@@ -174,14 +174,14 @@ struct PhoneCamMain {
       --demand-dir PATH                        serve development override for the shared demand directory
 
     Examples:
-      usb-wakecam run --source continuity
-      usb-wakecam run --source uvc --device "USB Camera"
-      usb-wakecam run --source android --facing back --size 1920x1080 --fps 30 --bitrate 12M
-      usb-wakecam run --source test
-      usb-wakecam preview --source android --require-hardware
-      usb-wakecam preview --source android --require-hardware --syphon
-      usb-wakecam serve --source android --serial USB_SERIAL --size 1920x1080 --fps 60
-      usb-wakecam probe --device "USB WakeCam" --duration 5
+      droiddozecam run --source continuity
+      droiddozecam run --source uvc --device "USB Camera"
+      droiddozecam run --source android --facing back --size 1920x1080 --fps 30 --bitrate 12M
+      droiddozecam run --source test
+      droiddozecam preview --source android --require-hardware
+      droiddozecam preview --source android --require-hardware --syphon
+      droiddozecam serve --source android --serial USB_SERIAL --size 1920x1080 --fps 60
+      droiddozecam probe --device "DroidDozeCam" --duration 5
 
     iPhone: Continuity Camera requirements apply; macOS controls USB/wireless routing.
     Android: native USB Webcam when supported, otherwise Android 12+ / USB debugging / ADB.

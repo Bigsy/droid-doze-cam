@@ -11,7 +11,7 @@ import threading
 import time
 
 parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument("--cli", default=str(Path(__file__).resolve().parent.parent / "dist/USBWakeCam.app/Contents/MacOS/phonecam"))
+parser.add_argument("--cli", default=str(Path(__file__).resolve().parent.parent / "dist/DroidDozeCam.app/Contents/MacOS/phonecam"))
 args = parser.parse_args()
 checks = 0
 
@@ -33,7 +33,7 @@ assert run(["version"]).stdout.strip() == "0.1.0"
 assert run(["--version"]).stdout.strip() == "0.1.0"
 passed("version and --version")
 help_text = run(["help"]).stdout
-assert "usb-wakecam probe" in help_text and "usb-wakecam serve" in help_text and "--syphon" in help_text
+assert "droiddozecam probe" in help_text and "droiddozecam serve" in help_text and "--syphon" in help_text
 passed("help")
 assert "FPS must" in run(["probe", "--fps", "0"], expected=64).stderr
 assert "Unknown command" in run(["not-a-command"], expected=64).stderr

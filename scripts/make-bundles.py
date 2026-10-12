@@ -20,7 +20,7 @@ def assemble(output, binary_dir, team, bundle_id, build_number):
         raise ValueError("BUNDLE_ID must be a reverse-DNS identifier")
     if not re.fullmatch(r"[0-9]+(?:\.[0-9]+){0,2}", build_number):
         raise ValueError("BUILD_NUMBER must have one to three numeric components")
-    app = output / "USBWakeCam.app"
+    app = output / "DroidDozeCam.app"
     if app.exists():
         raise FileExistsError(f"Refusing to merge into an existing app: {app}")
     ext_id = bundle_id + ".camera"
@@ -28,18 +28,18 @@ def assemble(output, binary_dir, team, bundle_id, build_number):
     extension = app / "Contents/Library/SystemExtensions" / (ext_id + ".systemextension")
     common = {"CFBundleDevelopmentRegion": "en", "CFBundleInfoDictionaryVersion": "6.0",
               "CFBundleShortVersionString": "0.1.0", "CFBundleVersion": build_number,
-              "LSMinimumSystemVersion": "13.0", "NSHumanReadableCopyright": "Copyright 2026 PhoneCam contributors and USB WakeCam contributors"}
-    host_info = dict(common, CFBundleIdentifier=bundle_id, CFBundleName="USB WakeCam", CFBundleDisplayName="USB WakeCam",
+              "LSMinimumSystemVersion": "13.0", "NSHumanReadableCopyright": "Copyright 2026 PhoneCam contributors and DroidDozeCam contributors"}
+    host_info = dict(common, CFBundleIdentifier=bundle_id, CFBundleName="DroidDozeCam", CFBundleDisplayName="DroidDozeCam",
                      CFBundleExecutable="phonecam", CFBundlePackageType="APPL", CFBundleIconFile="PhoneCam.icns", LSUIElement=True,
                      PhoneCamAppGroup=group,
-                     NSCameraUsageDescription="USB WakeCam uses your connected phone camera and passes video to your Mac camera applications.",
+                     NSCameraUsageDescription="DroidDozeCam uses your connected phone camera and passes video to your Mac camera applications.",
                      NSCameraUseContinuityCameraDeviceType=True,
-                     NSSystemExtensionUsageDescription="USB WakeCam installs a virtual camera so applications can use your USB phone video.")
-    ext_info = dict(common, CFBundleIdentifier=ext_id, CFBundleName="USB WakeCam Camera", CFBundleDisplayName="USB WakeCam",
+                     NSSystemExtensionUsageDescription="DroidDozeCam installs a virtual camera so applications can use your USB phone video.")
+    ext_info = dict(common, CFBundleIdentifier=ext_id, CFBundleName="DroidDozeCam Camera", CFBundleDisplayName="DroidDozeCam",
                     CFBundleExecutable="PhoneCamCameraExtension", CFBundlePackageType="SYSX",
                     PhoneCamAppGroup=group,
                     CMIOExtension={"CMIOExtensionMachServiceName": group},
-                    NSSystemExtensionUsageDescription="Expose phone video as USB WakeCam.",
+                    NSSystemExtensionUsageDescription="Expose phone video as DroidDozeCam.",
                     PhoneCamHostBundleIdentifier=bundle_id, PhoneCamTeamIdentifier=team)
     for bundle, info, executable in [(app, host_info, "phonecam"), (extension, ext_info, "PhoneCamCameraExtension")]:
         write_plist(bundle / "Contents/Info.plist", info)

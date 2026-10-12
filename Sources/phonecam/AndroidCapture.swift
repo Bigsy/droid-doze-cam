@@ -12,7 +12,7 @@ struct AndroidTools {
         if let path = c.serverPath { candidates = [(path as NSString).expandingTildeInPath] }
         else {
             if let resources = Bundle.main.resourceURL { candidates.append(resources.appendingPathComponent("scrcpy-server-v\(Constants.scrcpyVersion)").path) }
-            candidates.append(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/USBWakeCam/scrcpy-server-v\(Constants.scrcpyVersion)").path)
+            candidates.append(FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/DroidDozeCam/scrcpy-server-v\(Constants.scrcpyVersion)").path)
         }
         guard let path = candidates.first(where:{FileManager.default.fileExists(atPath:$0)}) else {
             throw PhoneCamError.message("Pinned scrcpy server \(Constants.scrcpyVersion) is missing. Run scripts/setup-android.sh from the source package.")

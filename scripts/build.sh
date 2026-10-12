@@ -3,7 +3,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MODE="${1:---signed}"
 SWIFT_BUILD_FLAGS=()
-if [[ "${USB_WAKECAM_DISABLE_SWIFT_SANDBOX:-0}" == 1 ]]; then
+if [[ "${DROIDDOZECAM_DISABLE_SWIFT_SANDBOX:-0}" == 1 ]]; then
   SWIFT_BUILD_FLAGS+=(--disable-sandbox)
   mkdir -p "$ROOT/.module-cache"
   export CLANG_MODULE_CACHE_PATH="$ROOT/.module-cache"
@@ -44,7 +44,7 @@ else
   xcrun lipo -create "${EXT_BINARIES[@]}" -output "$STAGE/binaries/PhoneCamCameraExtension"
 fi
 python3 "$ROOT/scripts/make-bundles.py" --output "$STAGE/bundle" --binaries "$STAGE/binaries" --team "$TEAM_ID" --bundle-id "$BUNDLE_ID" --build-number "$BUILD_NUMBER"
-APP="$STAGE/bundle/USBWakeCam.app"
+APP="$STAGE/bundle/DroidDozeCam.app"
 EXT="$APP/Contents/Library/SystemExtensions/$BUNDLE_ID.camera.systemextension"
 if [[ "$MODE" == --signed ]]; then
   if ! security cms -D -i "$HOST_PROFILE" > "$STAGE/host-profile.plist" 2>/dev/null; then
@@ -70,13 +70,13 @@ codesign --verify --deep --strict --verbose=2 "$APP"
 plutil -lint "$APP/Contents/Info.plist" "$EXT/Contents/Info.plist"
 "$APP/Contents/MacOS/phonecam" version
 mkdir -p "$ROOT/dist"
-if [[ -e "$ROOT/dist/USBWakeCam.app" ]]; then
-  if [[ -e "$ROOT/dist/USBWakeCam.previous.app" ]]; then rm -rf "$ROOT/dist/USBWakeCam.previous.app"; fi
-  mv "$ROOT/dist/USBWakeCam.app" "$ROOT/dist/USBWakeCam.previous.app"
+if [[ -e "$ROOT/dist/DroidDozeCam.app" ]]; then
+  if [[ -e "$ROOT/dist/DroidDozeCam.previous.app" ]]; then rm -rf "$ROOT/dist/DroidDozeCam.previous.app"; fi
+  mv "$ROOT/dist/DroidDozeCam.app" "$ROOT/dist/DroidDozeCam.previous.app"
 fi
-mv "$APP" "$ROOT/dist/USBWakeCam.app"
+mv "$APP" "$ROOT/dist/DroidDozeCam.app"
 cp "$STAGE/bundle/Host.entitlements" "$STAGE/bundle/Camera.entitlements" "$ROOT/dist/"
 printf '%s\n' "$MODE" > "$ROOT/dist/build-mode.txt"
-echo "Built: $ROOT/dist/USBWakeCam.app ($ARCHS)"
+echo "Built: $ROOT/dist/DroidDozeCam.app ($ARCHS)"
 if [[ "$MODE" == --unsigned ]]; then echo "UNSIGNED DEVELOPMENT BUILD: local preview/probe are available; camera-extension activation requires a signed build."
 else echo "For release distribution, notarize/staple before installation. See docs/SIGNING.md."; fi

@@ -29,7 +29,7 @@ final class CameraProvider: NSObject, CMIOExtensionProviderSource {
     }
     var availableProperties: Set<CMIOExtensionProperty> { [.providerManufacturer] }
     func providerProperties(forProperties properties: Set<CMIOExtensionProperty>) throws -> CMIOExtensionProviderProperties {
-        let p = CMIOExtensionProviderProperties(dictionary: [:]); p.manufacturer = "USB WakeCam"; return p
+        let p = CMIOExtensionProviderProperties(dictionary: [:]); p.manufacturer = Constants.cameraName; return p
     }
     func setProviderProperties(_ properties: CMIOExtensionProviderProperties) throws {}
     func connect(to client: CMIOExtensionClient) throws {}
@@ -67,7 +67,7 @@ final class CameraDevice: NSObject, CMIOExtensionDeviceSource {
     var availableProperties: Set<CMIOExtensionProperty> { [.deviceTransportType, .deviceModel, Self.demandProperty] }
     func deviceProperties(forProperties properties: Set<CMIOExtensionProperty>) throws -> CMIOExtensionDeviceProperties {
         let p = CMIOExtensionDeviceProperties(dictionary: [:]); p.transportType = kIOAudioDeviceTransportTypeVirtual
-        p.model = "USB WakeCam Video Bridge"
+        p.model = "\(Constants.cameraName) Video Bridge"
         if properties.contains(Self.demandProperty) { p.setPropertyState(demandState(owner.sync { sourceUsers > 0 }), forProperty: Self.demandProperty) }
         return p
     }
@@ -189,7 +189,7 @@ final class CameraStream: NSObject, CMIOExtensionStreamSource {
                 maxFrameDuration: CMTime(value: 1, timescale: 15), minFrameDuration: CMTime(value: 1, timescale: 60), validFrameDurations: nil)
         }
         super.init()
-        stream = CMIOExtensionStream(localizedName: sink ? "USB WakeCam Producer" : "USB WakeCam Video",
+        stream = CMIOExtensionStream(localizedName: sink ? "\(Constants.cameraName) Producer" : "\(Constants.cameraName) Video",
             streamID: UUID(uuidString: sink ? Constants.sinkUUID : Constants.sourceUUID)!, direction: sink ? .sink : .source,
             clockType: .hostTime, source: self)
     }
@@ -238,7 +238,7 @@ final class CameraStream: NSObject, CMIOExtensionStreamSource {
         camera.owner.sync {
             guard sink else { return true } // Camera consumers are additionally subject to the OS's camera permission model.
             guard client == nil || client?.clientID == candidate.clientID, trusted(candidate) else {
-                cameraLog.error("Rejected producer; use the correctly signed USB WakeCam host app."); return false
+                cameraLog.error("Rejected producer; use the correctly signed DroidDozeCam host app."); return false
             }
             client = candidate; return true
         }
