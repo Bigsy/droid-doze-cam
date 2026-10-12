@@ -44,14 +44,12 @@ enum OnDemandService {
         capture.command = "run"
         capture.duration = nil
 
-        let demand: CameraDemandFile
+        let demand: () -> Bool
         if let path = original.demandDirectory {
-            demand = CameraDemandFile(directory: URL(fileURLWithPath: (path as NSString).expandingTildeInPath, isDirectory: true))
+            let file = CameraDemandFile(directory: URL(fileURLWithPath: (path as NSString).expandingTildeInPath, isDirectory: true))
+            demand = { file.current() }
         } else {
-            guard let group = Bundle.main.object(forInfoDictionaryKey: "PhoneCamAppGroup") as? String else {
-                throw PhoneCamError.message("Run serve from the signed USBWakeCam.app with its camera app group.")
-            }
-            demand = try CameraDemandFile(appGroup: group)
+            demand = VirtualCameraWriter.demandActive
         }
         log("Waiting for a Mac app to use \(Constants.cameraName). The phone screen stays dark.")
         var session: CaptureSession?
@@ -59,7 +57,7 @@ enum OnDemandService {
         var stopping = false
         var nextAttempt = 0.0
         while !cancellation.isCancelled {
-            let wanted = demand.current()
+            let wanted = demand()
             if let running = session, running.isFinished {
                 session = nil
                 if stopping, let phone = activePhone { PhoneScreen.sleepIfLocked(adb: phone.adb, serial: phone.serial) }

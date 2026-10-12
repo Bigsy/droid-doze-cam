@@ -31,9 +31,9 @@ HOST_BINARIES=(); EXT_BINARIES=()
 for ARCH in $ARCHS; do
   case "$ARCH" in arm64|x86_64) ;; *) echo "Unsupported architecture: $ARCH" >&2; exit 1;; esac
   SCRATCH="$ROOT/.build-$ARCH"
-  xcrun swift build "${SWIFT_BUILD_FLAGS[@]}" --package-path "$ROOT" --scratch-path "$SCRATCH" --arch "$ARCH" -c release --product phonecam
-  xcrun swift build "${SWIFT_BUILD_FLAGS[@]}" --package-path "$ROOT" --scratch-path "$SCRATCH" --arch "$ARCH" -c release --product PhoneCamCameraExtension
-  BIN="$(xcrun swift build "${SWIFT_BUILD_FLAGS[@]}" --package-path "$ROOT" --scratch-path "$SCRATCH" --arch "$ARCH" -c release --show-bin-path)"
+  xcrun swift build ${SWIFT_BUILD_FLAGS[@]+"${SWIFT_BUILD_FLAGS[@]}"} --package-path "$ROOT" --scratch-path "$SCRATCH" --arch "$ARCH" -c release --product phonecam
+  xcrun swift build ${SWIFT_BUILD_FLAGS[@]+"${SWIFT_BUILD_FLAGS[@]}"} --package-path "$ROOT" --scratch-path "$SCRATCH" --arch "$ARCH" -c release --product PhoneCamCameraExtension
+  BIN="$(xcrun swift build ${SWIFT_BUILD_FLAGS[@]+"${SWIFT_BUILD_FLAGS[@]}"} --package-path "$ROOT" --scratch-path "$SCRATCH" --arch "$ARCH" -c release --show-bin-path)"
   HOST_BINARIES+=("$BIN/phonecam"); EXT_BINARIES+=("$BIN/PhoneCamCameraExtension")
 done
 if [[ ${#HOST_BINARIES[@]} == 1 ]]; then

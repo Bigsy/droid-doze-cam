@@ -19,8 +19,9 @@ private enum CMIOProperties {
         try VideoFrames.check(status, "Read CMIO object list")
         return Array(result.prefix(Int(used) / 4))
     }
-    static func uid(_ object: CMIOObjectID) -> String? {
-        var address = address(UInt32(kCMIODevicePropertyDeviceUID)), used: UInt32 = 0
+    static func uid(_ object: CMIOObjectID) -> String? { string(object, UInt32(kCMIODevicePropertyDeviceUID)) }
+    static func string(_ object: CMIOObjectID, _ selector: UInt32) -> String? {
+        var address = address(selector), used: UInt32 = 0
         // CMIO returns a retained CF object through an untyped pointer.
         var value: Unmanaged<CFString>?
         let result = CMIOObjectGetPropertyData(object, &address, 0, nil, UInt32(MemoryLayout.size(ofValue: value)), &used, &value)
@@ -54,6 +55,12 @@ final class VirtualCameraWriter {
     static func findDevice() throws -> CMIODeviceID? {
         let devices = try CMIOProperties.ids(CMIOObjectID(kCMIOObjectSystemObject), UInt32(kCMIOHardwarePropertyDevices))
         return devices.first { CMIOProperties.uid($0)?.caseInsensitiveCompare(Constants.deviceUUID) == .orderedSame }
+    }
+    /// True while a Mac app streams the camera. A missing extension or device reads as no demand.
+    static func demandActive() -> Bool {
+        guard let device = try? findDevice() else { return false }
+        let selector = Constants.demandPropertyCode.utf8.reduce(UInt32(0)) { $0 << 8 | UInt32($1) }
+        return CMIOProperties.string(device, selector) == "1"
     }
     init(size: VideoSize, fps: Int) throws {
         guard let device = try Self.findDevice() else {

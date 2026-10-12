@@ -27,3 +27,9 @@ usb-wakecam install-extension
 ```
 
 Approve the camera extension when macOS requests it. The login service then waits for a Mac app to open `USB WakeCam`, starts the USB camera stream, and stops it after the last client closes. The phone display stays off. Run `./scripts/uninstall-service.sh` to remove the login service. [Apple's camera extension guide](https://developer.apple.com/documentation/coremediaio/creating-a-camera-extension-with-core-media-i-o) explains the activation and approval steps; the [upstream signing guide](SIGNING.md) has more detail on profiles and notarization.
+
+## Replacing an installed extension
+
+Bump `BUILD_NUMBER` for every replacement. If the old extension is running when macOS replaces it (a camera app or producer is attached), `registerassistantservice` can resubmit the launchd job before the old one is gone; launchd logs `Submit job failed ... Operation already in progress` and `usb-wakecam status` reports the camera as not visible. Close camera apps, stop `usb-wakecam serve`, then build and install the next build number; replacing an idle extension registers cleanly. No reboot is needed, though old builds stay listed as `terminated waiting to uninstall on reboot` until the next restart.
+
+The extension's sandbox cannot read the producer's bundle, so it authorizes the frame producer with the kernel's code-signing state for that PID (`csops`: valid signature, identifier `com.hedworth.usbwakecam`, team ID).

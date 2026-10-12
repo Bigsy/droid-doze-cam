@@ -53,13 +53,9 @@ final class CameraDevice: NSObject, CMIOExtensionDeviceSource {
     private var converted: CVPixelBuffer?
     private var clock = MonotonicClock()
     private var lastErrorLog: Double = 0
-    private let demandFile: CameraDemandFile?
-    private var lastDemandWrite: Double = 0
+    private static let demandProperty = CMIOExtensionProperty(rawValue: Constants.demandPropertyName)
     init(owner: CameraProvider) throws {
         self.owner = owner; renderer = try FrameRenderer(size: .hd)
-        if let group = Bundle.main.object(forInfoDictionaryKey: "PhoneCamAppGroup") as? String {
-            demandFile = try? CameraDemandFile(appGroup: group)
-        } else { demandFile = nil }
         super.init()
         _ = try renderer.black() // Reserve an immutable privacy frame before client buffers can fill the pool.
         device = CMIOExtensionDevice(localizedName: Constants.cameraName, deviceID: UUID(uuidString: Constants.deviceUUID)!,
@@ -68,10 +64,12 @@ final class CameraDevice: NSObject, CMIOExtensionDeviceSource {
         input = try CameraStream(device: self, sink: true)
         try device.addStream(output.stream); try device.addStream(input.stream)
     }
-    var availableProperties: Set<CMIOExtensionProperty> { [.deviceTransportType, .deviceModel] }
+    var availableProperties: Set<CMIOExtensionProperty> { [.deviceTransportType, .deviceModel, Self.demandProperty] }
     func deviceProperties(forProperties properties: Set<CMIOExtensionProperty>) throws -> CMIOExtensionDeviceProperties {
         let p = CMIOExtensionDeviceProperties(dictionary: [:]); p.transportType = kIOAudioDeviceTransportTypeVirtual
-        p.model = "USB WakeCam Video Bridge"; return p
+        p.model = "USB WakeCam Video Bridge"
+        if properties.contains(Self.demandProperty) { p.setPropertyState(demandState(owner.sync { sourceUsers > 0 }), forProperty: Self.demandProperty) }
+        return p
     }
     func setDeviceProperties(_ properties: CMIOExtensionDeviceProperties) throws {}
     func outputFormatChanged(index: Int, duration: CMTime) throws {
@@ -89,9 +87,11 @@ final class CameraDevice: NSObject, CMIOExtensionDeviceSource {
         timer.schedule(deadline: .now(), repeating: duration.seconds, leeway: .milliseconds(1))
         timer.setEventHandler { [weak self] in self?.emit() }; sourceTimer = timer; timer.resume()
     }
+    private func demandState(_ active: Bool) -> CMIOExtensionPropertyState<AnyObject> {
+        CMIOExtensionPropertyState(value: (active ? "1" : "0") as NSString)
+    }
     private func publishDemand(_ active: Bool) {
-        do { try demandFile?.publish(active: active); lastDemandWrite = ProcessInfo.processInfo.systemUptime }
-        catch { cameraLog.error("Camera demand signal: \(String(describing: error), privacy: .public)") }
+        device.notifyPropertiesChanged([Self.demandProperty: demandState(active)])
     }
     func startOutput() {
         sourceUsers += 1
@@ -110,7 +110,6 @@ final class CameraDevice: NSObject, CMIOExtensionDeviceSource {
     }
     private func emit() {
         guard sourceUsers > 0 else { return }
-        if ProcessInfo.processInfo.systemUptime - lastDemandWrite >= 1 { publishDemand(true) }
         autoreleasepool {
             do {
                 let pixel: CVPixelBuffer
@@ -222,20 +221,18 @@ final class CameraStream: NSObject, CMIOExtensionStreamSource {
         guard let expectedID = Bundle.main.object(forInfoDictionaryKey: "PhoneCamHostBundleIdentifier") as? String,
               let team = Bundle.main.object(forInfoDictionaryKey: "PhoneCamTeamIdentifier") as? String,
               team.count == 10 else { return false }
-        // CoreMediaIO may report signingID as "unknown" for a CLI inside a signed app.
-        // Verify the actual process signature instead of trusting that reported string.
-        var guest: SecCode?, requirement: SecRequirement?
-        let attributes = [kSecGuestAttributePid as String: NSNumber(value: candidate.pid)] as CFDictionary
-        let guestStatus = SecCodeCopyGuestWithAttributes(nil, attributes, SecCSFlags(rawValue: 0), &guest)
-        guard guestStatus == errSecSuccess, let guest else {
-            cameraLog.error("Cannot inspect producer PID \(candidate.pid): \(guestStatus)")
+        // CoreMediaIO may report signingID as "unknown" for a CLI inside a signed app, and the
+        // cmioextension sandbox cannot read the producer's bundle (SecCode fails with EPERM).
+        // Ask the kernel for the signature it validated when the producer process launched.
+        guard let signature = KernelCodeSignature(pid: candidate.pid) else {
+            cameraLog.error("Cannot inspect producer PID \(candidate.pid)")
             return false
         }
-        let text = "anchor apple generic and certificate leaf[subject.OU] = \"\(team)\" and identifier \"\(expectedID)\""
-        guard SecRequirementCreateWithString(text as CFString, SecCSFlags(rawValue: 0), &requirement) == errSecSuccess, let requirement else { return false }
-        let checkStatus = SecCodeCheckValidity(guest, SecCSFlags(rawValue: 0), requirement)
-        if checkStatus != errSecSuccess { cameraLog.error("Producer signature check failed: \(checkStatus)") }
-        return checkStatus == errSecSuccess
+        let accepted = signature.valid && signature.identifier == expectedID && signature.teamID == team
+        if !accepted {
+            cameraLog.error("Producer signature rejected: valid=\(signature.valid) identifier=\(signature.identifier ?? "-", privacy: .public) team=\(signature.teamID ?? "-", privacy: .public)")
+        }
+        return accepted
     }
     func authorizedToStartStream(for candidate: CMIOExtensionClient) -> Bool {
         camera.owner.sync {
@@ -248,4 +245,30 @@ final class CameraStream: NSObject, CMIOExtensionStreamSource {
     }
     func startStream() throws { try camera.owner.sync { if sink { try camera.startInput() } else { camera.startOutput() } } }
     func stopStream() throws { camera.owner.sync { if sink { camera.stopInput() } else { camera.stopOutput() } } }
+}
+
+/// Code-signing state held by the kernel for a running process (see <sys/codesign.h>).
+private struct KernelCodeSignature {
+    private typealias CSOps = @convention(c) (pid_t, UInt32, UnsafeMutableRawPointer?, Int) -> Int32
+    private static let csops: CSOps? = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "csops").map { unsafeBitCast($0, to: CSOps.self) }
+    private static let statusOp: UInt32 = 0, identityOp: UInt32 = 11, teamIDOp: UInt32 = 14
+    private static let validFlag: UInt32 = 0x1
+    let valid: Bool
+    let identifier: String?
+    let teamID: String?
+    init?(pid: pid_t) {
+        guard pid > 0, let csops = Self.csops else { return nil }
+        var flags: UInt32 = 0
+        guard csops(pid, Self.statusOp, &flags, MemoryLayout<UInt32>.size) == 0 else { return nil }
+        valid = flags & Self.validFlag != 0
+        identifier = Self.string(csops, pid, Self.identityOp)
+        teamID = Self.string(csops, pid, Self.teamIDOp)
+    }
+    /// Identity and team ID come back as a blob: 4-byte magic, 4-byte length, then a NUL-terminated string.
+    private static func string(_ csops: CSOps, _ pid: pid_t, _ op: UInt32) -> String? {
+        var blob = [UInt8](repeating: 0, count: 512)
+        guard blob.withUnsafeMutableBytes({ csops(pid, op, $0.baseAddress, $0.count) }) == 0 else { return nil }
+        let text = blob[8...].prefix { $0 != 0 }
+        return text.isEmpty ? nil : String(decoding: text, as: UTF8.self)
+    }
 }

@@ -16,6 +16,10 @@ public enum Constants {
     public static let scrcpySHA256 = "8588238c9a5a00aa542906b6ec7e6d5541d9ffb9b5d0f6e1bc0e365e2303079e"
     public static let maxPacketBytes = 16 * 1024 * 1024
     public static let staleFrameSeconds = 1.5
+    // Custom device property ("1" while a Mac app streams the camera). It travels over CoreMediaIO
+    // because the extension runs as _cmiodalassistants, so its App Group container is not the user's.
+    public static let demandPropertyCode = "wdmd"
+    public static let demandPropertyName = "4cc_wdmd_glob_0000"
 }
 
 public struct VideoSize: Equatable, Codable, CustomStringConvertible, Sendable {
