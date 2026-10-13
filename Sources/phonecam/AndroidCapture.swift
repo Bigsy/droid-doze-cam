@@ -4,9 +4,32 @@ import CryptoKit
 import PhoneCamCore
 
 struct AndroidTools {
+    static let savedADBPathKey = "setup.adbPath"
     let adb: String
-    init(_ c: Configuration) throws { adb = try ProcessRunner.executable("adb",override:c.adbPath) }
+    init(_ c: Configuration) throws {
+        if let explicit = c.adbPath {
+            adb = try ProcessRunner.executable("adb", override: explicit)
+        } else if let saved = UserDefaults.standard.string(forKey: Self.savedADBPathKey),
+                  FileManager.default.isExecutableFile(atPath: saved) {
+            adb = saved
+        } else {
+            adb = try ProcessRunner.executable("adb")
+        }
+    }
     func devices(cancellation: Cancellation? = nil) throws -> [ADBDevice] { ADBDevice.parse(try ProcessRunner.run(adb,["devices","-l"],cancellation:cancellation).text) }
+    func cameras(cancellation: Cancellation? = nil) throws -> (device: ADBDevice, cameras: [AndroidCameraInfo]) {
+        let device = try ADBDevice.select(devices(cancellation: cancellation), serial: nil)
+        let server = try Self.serverPath(Configuration())
+        let remote = "/data/local/tmp/phonecam-list-\(UUID().uuidString).jar"
+        let prefix = ["-s", device.serial]
+        _ = try ProcessRunner.run(adb, prefix + ["push", server, remote], timeout: 20, cancellation: cancellation)
+        defer { _ = try? ProcessRunner.run(adb, prefix + ["shell", "rm", "-f", remote], timeout: 3, allowFailure: true) }
+        let output = try ProcessRunner.run(adb, prefix + ["shell", "CLASSPATH=\(remote)", "app_process", "/",
+            "com.genymobile.scrcpy.Server", Constants.scrcpyVersion, "list_cameras=true"], timeout: 10, cancellation: cancellation).text
+        let cameras = AndroidCameraInfo.parse(output)
+        guard !cameras.isEmpty else { throw PhoneCamError.message("Android reported no selectable cameras.") }
+        return (device, cameras)
+    }
     static func serverPath(_ c: Configuration) throws -> String {
         var candidates: [String] = []
         if let path = c.serverPath { candidates = [(path as NSString).expandingTildeInPath] }
@@ -49,7 +72,9 @@ final class AndroidCapture: CaptureSource {
             "video_codec_options=i-frame-interval=1,max-bframes=0"
         ]
         if let id = c.cameraID { options.append("camera_id=\(id)") } else { options.append("camera_facing=\(c.facing)") }
+        if c.fps > 60 { options.append("camera_high_speed=true") }
         if let size = c.androidSize { options.append("camera_size=\(size)") }
+        else if c.fps > 60 { options.append("camera_size=\(c.size)") }
         else { options += ["max_size=\(c.size.width)","camera_ar=16:9"] }
         let process = Process()
         process.executableURL = URL(fileURLWithPath:tools.adb)

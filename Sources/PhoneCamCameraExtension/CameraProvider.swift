@@ -184,9 +184,10 @@ final class CameraStream: NSObject, CMIOExtensionStreamSource {
     var client: CMIOExtensionClient?
     init(device: CameraDevice, sink: Bool) throws {
         camera = device; self.sink = sink
-        formats = try VideoSize.supported.map {
-            CMIOExtensionStreamFormat(formatDescription: try VideoFrames.description(size: $0),
-                maxFrameDuration: CMTime(value: 1, timescale: 15), minFrameDuration: CMTime(value: 1, timescale: 60), validFrameDurations: nil)
+        formats = try VideoSize.supported.map { size in
+            let maximumFPS: Int32 = size == .ultraHD ? 60 : 120
+            return CMIOExtensionStreamFormat(formatDescription: try VideoFrames.description(size: size),
+                maxFrameDuration: CMTime(value: 1, timescale: 15), minFrameDuration: CMTime(value: 1, timescale: maximumFPS), validFrameDurations: nil)
         }
         super.init()
         stream = CMIOExtensionStream(localizedName: sink ? "\(Constants.cameraName) Producer" : "\(Constants.cameraName) Video",
@@ -208,9 +209,12 @@ final class CameraStream: NSObject, CMIOExtensionStreamSource {
     func setStreamProperties(_ properties: CMIOExtensionStreamProperties) throws {
         try camera.owner.sync {
             let index = properties.activeFormatIndex ?? activeIndex
-            let time = properties.frameDuration ?? duration
-            guard formats.indices.contains(index), time.isNumeric, time.seconds.isFinite,
-                  time.seconds >= 1.0/60.0 - 0.00001, time.seconds <= 1.0/15.0 + 0.00001 else {
+            guard formats.indices.contains(index) else { throw PhoneCamError.message("Unsupported camera format.") }
+            let maximumFPS: Int32 = VideoSize.supported[index] == .ultraHD ? 60 : 120
+            let minimumDuration = CMTime(value: 1, timescale: maximumFPS)
+            let time = properties.frameDuration ?? (index != activeIndex && duration.seconds < minimumDuration.seconds ? minimumDuration : duration)
+            guard time.isNumeric, time.seconds.isFinite,
+                  time.seconds >= minimumDuration.seconds - 0.00001, time.seconds <= 1.0/15.0 + 0.00001 else {
                 throw PhoneCamError.message("Unsupported camera format or frame duration.")
             }
             if !sink { try camera.outputFormatChanged(index: index, duration: time) }

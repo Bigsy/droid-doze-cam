@@ -86,6 +86,11 @@ enum CaptureRuntime {
         let privacyFrame = syphon != nil ? try renderer.black() : nil
         let writer = c.command == "run" ? try VirtualCameraWriter(size: c.size, fps: c.fps) : nil
         let mailbox = LatestValue<ArrivedFrame>(), failure = LatestValue<String>(), counters = Counters()
+        let settingsStore = CameraSettingsStore()
+        var savedTransform = settingsStore.read()
+        let backgroundBlur = BackgroundBlurProcessor()
+        var lastSettingsRead = ProcessInfo.processInfo.systemUptime
+        var reportedBlurDevice = false
         let queue = DispatchQueue(label: "PhoneCam.render", qos: .userInteractive, autoreleaseFrequency: .workItem)
         let timer = DispatchSource.makeTimerSource(queue: queue)
         let started = ProcessInfo.processInfo.systemUptime
@@ -97,13 +102,32 @@ enum CaptureRuntime {
             let now = ProcessInfo.processInfo.systemUptime
             if now - started >= duration { cancellation.cancel() }
             guard !cancellation.isCancelled else { return }
+            if now - lastSettingsRead >= 0.5 {
+                savedTransform = settingsStore.read()
+                lastSettingsRead = now
+            }
             if let item = mailbox.take() {
                 lastInput = item.time; sentPrivacyFrame = false
                 if now - item.time > 0.25 { counters.output(false) }
                 else {
                     autoreleasepool {
                         do {
-                            let pixel = try renderer.convert(item.pixel, rotation: c.rotation, mirror: c.mirror, fit: c.fit)
+                            let converted = try renderer.convert(item.pixel,
+                                rotation: c.rotationIsExplicit ? c.rotation : savedTransform.rotation,
+                                mirror: c.mirrorIsExplicit ? c.mirror : savedTransform.mirror,
+                                fit: c.fitIsExplicit ? c.fit : savedTransform.fit,
+                                zoom: c.zoomIsExplicit ? c.zoom : savedTransform.zoom)
+                            let pixel: CVPixelBuffer
+                            if savedTransform.backgroundBlur {
+                                if !reportedBlurDevice {
+                                    log("Background blur segmentation: \(backgroundBlur.computeDeviceDescription); compositing: \(renderer.usesMetal ? "Metal" : "Core Image CPU")")
+                                    reportedBlurDevice = true
+                                }
+                                pixel = try backgroundBlur.apply(to: converted, radius: savedTransform.blurRadius, renderer: renderer)
+                            } else {
+                                backgroundBlur.disable()
+                                pixel = converted
+                            }
                             try syphon?.publish(pixel)
                             let success = try writer?.send(pixel) ?? true
                             if success { onProcessedFrame?(pixel) }

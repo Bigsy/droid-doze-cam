@@ -9,6 +9,7 @@ import sys
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("profile")
 parser.add_argument("entitlements")
+parser.add_argument("--distribution", action="store_true", help="Reject development or device-limited profiles")
 args = parser.parse_args()
 with open(args.profile, "rb") as f:
     profile = plistlib.load(f)
@@ -38,6 +39,13 @@ for key in ["com.apple.security.application-groups"]:
 if "com.apple.developer.system-extension.install" in requested:
     if allowed.get("com.apple.developer.system-extension.install") is not True:
         errors.append("Host profile is missing the System Extension capability")
+if args.distribution:
+    if allowed.get("com.apple.security.get-task-allow", allowed.get("get-task-allow", False)):
+        errors.append("Distribution profile permits debugging (get-task-allow)")
+    if profile.get("ProvisionedDevices"):
+        errors.append("Distribution profile is limited to registered devices")
+    if profile.get("ProvisionsAllDevices") is not True or "OSX" not in profile.get("Platform", []):
+        errors.append("Expected a Developer ID profile for all Macs")
 if errors:
     print("Provisioning validation failed:\n  " + "\n  ".join(errors), file=sys.stderr)
     sys.exit(1)

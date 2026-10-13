@@ -90,10 +90,13 @@ enum Commands {
 struct PhoneCamMain {
     private static var manager: ExtensionManager?
     private static var preview: PreviewWindowController?
+    private static var menuBar: MenuBarApp?
     private static var signals: [DispatchSourceSignal] = []
     static func main() {
         let c: Configuration
-        do { c = try Configuration.parse(Array(CommandLine.arguments.dropFirst())) }
+        let arguments = Array(CommandLine.arguments.dropFirst())
+        let launchArguments = arguments.isEmpty && Bundle.main.bundleURL.pathExtension == "app" ? ["menu"] : arguments
+        do { c = try Configuration.parse(launchArguments) }
         catch { log(error.localizedDescription); exit(64) }
         if c.command == "help" { print(help); return }
         if c.command == "version" { print(Constants.version); return }
@@ -111,7 +114,9 @@ struct PhoneCamMain {
             source.resume(); signals.append(source)
         }
         DispatchQueue.main.async {
-            if c.command == "install-extension" || c.command == "uninstall-extension" {
+            if c.command == "menu" {
+                menuBar = MenuBarApp()
+            } else if c.command == "install-extension" || c.command == "uninstall-extension" {
                 let task = ExtensionManager(activate:c.command == "install-extension") { exit($0) }
                 manager = task
                 do { try task.submit() } catch { log(error.localizedDescription); exit(1) }
@@ -142,6 +147,7 @@ struct PhoneCamMain {
     droiddozecam devices [--json]               List AVFoundation cameras and authorized/unauthorized USB ADB phones
     droiddozecam doctor [--json]                Inspect permissions, code signatures, GPU and USB prerequisites
     droiddozecam status [--json]                Inspect extension registration and virtual camera visibility
+    droiddozecam menu                           Show the menu bar settings app (also opens from Finder)
     droiddozecam install-extension             Activate the signed, bundled camera system extension (approval required)
     droiddozecam uninstall-extension           Request extension deactivation (may require a reboot)
     droiddozecam run [OPTIONS]                  Publish to "\(Constants.cameraName)"; Ctrl+C stops
@@ -154,15 +160,16 @@ struct PhoneCamMain {
       --source auto|continuity|uvc|android|test  Default: auto; never automatically selects another virtual camera
       --device ID_OR_NAME                      Native selector; probe/preview may explicitly select PhoneCam for testing
       --serial USB_SERIAL                      Android USB selector; wireless ADB is rejected
-      --size 640x480|1280x720|1920x1080          Bridge size; default 1280x720 (meeting apps select their output format)
-      --fps 15|24|25|30|60                      Default 30; actual source must support it
-      --bitrate 8M                             Android H.264 bitrate; default 8M
-      --facing front|back|external              Android only; default back
+      --size 640x480|1280x720|1920x1080|2560x1440|3840x2160  Bridge size; default 720p (serve: saved setting or 1080p)
+      --fps 15|24|25|30|60|120                  Requested frame rate; 4K up to 60, 120 needs a high-speed camera mode
+      --bitrate 8M                             Android H.264 bitrate; default 8M (serve: saved setting or 20M)
+      --facing front|back|external              Android only; default back (serve: saved setting)
       --camera-id ID                           Android physical/logical camera ID; mutually exclusive with --facing
       --android-size WIDTHxHEIGHT              Request an exact Android camera size, instead of automatic selection
-      --rotate 0|90|180|270                     Clockwise image rotation
-      --mirror                                 Horizontal mirror after rotation
-      --fit fit|fill                           Letterbox or crop; default fit
+      --rotate 0|90|180|270                     Clockwise image rotation; overrides saved setting
+      --zoom 1...4                             Digital centre crop; overrides saved setting
+      --mirror | --no-mirror                   Override saved horizontal mirror setting
+      --fit fit|fill                           Letterbox or crop; overrides saved setting
       --require-hardware                       Reject software H.264 decode (Android only)
       --syphon                                 Share processed frames locally with OBS (preview/probe only)
       --syphon-framework PATH                  Optional path to an installed official Syphon.framework

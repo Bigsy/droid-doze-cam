@@ -14,7 +14,8 @@ products += [
 targets += [
     .target(name: "PhoneCamMedia", dependencies: ["PhoneCamCore"], linkerSettings: [
         .linkedFramework("CoreMedia"), .linkedFramework("CoreVideo"),
-        .linkedFramework("CoreImage"), .linkedFramework("Metal"), .linkedFramework("IOSurface")
+        .linkedFramework("CoreImage"), .linkedFramework("Metal"), .linkedFramework("IOSurface"),
+        .linkedFramework("Vision"), .linkedFramework("CoreML")
     ]),
     .target(name: "PhoneCamSyphon", publicHeadersPath: "include", cSettings: [.unsafeFlags(["-fobjc-arc"])], linkerSettings: [
         .linkedFramework("Foundation"), .linkedFramework("AppKit"), .linkedFramework("Metal"), .linkedFramework("CoreVideo")

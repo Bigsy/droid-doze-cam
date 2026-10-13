@@ -29,13 +29,13 @@ jobs:
       - name: Core, media, tooling tests and unsigned app build
         run: scripts/test.sh
       - name: Preserve app bundle permissions in a development archive
-        run: ditto -c -k --keepParent dist/PhoneCam.app dist/PhoneCam-macos-development.zip
+        run: ditto -c -k --keepParent dist/DroidDozeCam.app dist/DroidDozeCam-macos-development.zip
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: unsigned-macos-development-build
           if-no-files-found: error
           retention-days: 14
           path: |
-            dist/PhoneCam-macos-development.zip
+            dist/DroidDozeCam-macos-development.zip
             dist/build-mode.txt
 # No signing certificate is stored here. Unsigned CI artifacts cannot activate camera system extensions.

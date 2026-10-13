@@ -1,6 +1,6 @@
 # Third-party components and references
 
-## scrcpy-server (external download, not bundled)
+## scrcpy-server
 
 Project: Genymobile/scrcpy
 Pinned version: 3.3.4
@@ -9,15 +9,15 @@ Upstream license: Apache License 2.0
 Copyright: Genymobile and scrcpy contributors; see the upstream source notices.
 License text: https://github.com/Genymobile/scrcpy/blob/v3.3.4/LICENSE
 
-This repository does not include the scrcpy server binary or copy its Java implementation. The optional setup script downloads the official release asset and verifies this SHA-256:
+This repository does not include the scrcpy server binary or copy its Java implementation. The public release script downloads the official release asset, verifies its SHA-256, and bundles it with the matching Apache-2.0 license in the signed app. Source builds can still use the optional setup script to download it separately. The expected server hash is:
 
 `8588238c9a5a00aa542906b6ec7e6d5541d9ffb9b5d0f6e1bc0e365e2303079e`
 
-The Swift receiver implements the documented, version-pinned binary protocol. If you redistribute the server along with your product, comply with Apache-2.0 and preserve applicable upstream license/NOTICE material; the MIT license on PhoneCam does not relicense scrcpy.
+The Swift receiver implements the documented, version-pinned binary protocol. The release app includes `scrcpy-LICENSE.txt` and this notice. The MIT license on DroidDozeCam does not relicense scrcpy.
 
-## Android Platform-Tools / ADB (separate installation)
+## Android Platform-Tools / ADB (user download)
 
-The user installs official Android SDK Platform-Tools or a distribution such as Homebrew's android-platform-tools cask. Google's downloaded SDK package has its own terms. PhoneCam does not bundle, relicense, or replace those binaries.
+The release app can download official Android SDK Platform-Tools 37.0.1 from Google after the user accepts Google's SDK terms. It verifies the pinned archive hash, extracts the package into that user's Application Support folder, and retains Google's `NOTICE.txt`. The user can also select an existing installation or use a distribution such as Homebrew's android-platform-tools cask. The release ZIP does not bundle or relicense Google's Platform-Tools binaries.
 
 Official distribution: https://developer.android.com/tools/releases/platform-tools
 Homebrew cask: https://formulae.brew.sh/cask/android-platform-tools
