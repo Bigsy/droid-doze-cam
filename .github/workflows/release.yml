@@ -1,0 +1,82 @@
+name: Notarized Apple Silicon release
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: New camera extension build number (higher than every previous release)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check release inputs
+        env:
+          BUILD_NUMBER: ${{ inputs.build_number }}
+          P12_B64: ${{ secrets.APPLE_DEVELOPER_ID_P12_B64 }}
+          P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          HOST_PROFILE_B64: ${{ secrets.APPLE_HOST_PROFILE_B64 }}
+          CAMERA_PROFILE_B64: ${{ secrets.APPLE_CAMERA_PROFILE_B64 }}
+          NOTARY_PASSWORD: ${{ secrets.APPLE_NOTARY_PASSWORD }}
+        run: |
+          [[ "$BUILD_NUMBER" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]] || { echo 'Invalid build number.' >&2; exit 1; }
+          for name in P12_B64 P12_PASSWORD HOST_PROFILE_B64 CAMERA_PROFILE_B64 NOTARY_PASSWORD; do
+            [[ -n "${!name}" ]] || { echo "Missing release credential: $name" >&2; exit 1; }
+          done
+
+      - name: Import Developer ID identity and provisioning profiles
+        env:
+          P12_B64: ${{ secrets.APPLE_DEVELOPER_ID_P12_B64 }}
+          P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_ID_P12_PASSWORD }}
+          HOST_PROFILE_B64: ${{ secrets.APPLE_HOST_PROFILE_B64 }}
+          CAMERA_PROFILE_B64: ${{ secrets.APPLE_CAMERA_PROFILE_B64 }}
+        run: |
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/droiddozecam.keychain-db"
+          p12="$RUNNER_TEMP/droiddozecam.p12"
+          keychain_password="$(openssl rand -hex 32)"
+          printf '%s' "$P12_B64" | base64 -D > "$p12"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 7200 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$p12" -k "$keychain" -P "$P12_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          rm -f "$p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain"
+          security list-keychains -d user -s "$keychain"
+          security default-keychain -d user -s "$keychain"
+          printf '%s' "$HOST_PROFILE_B64" | base64 -D > "$RUNNER_TEMP/host.provisionprofile"
+          printf '%s' "$CAMERA_PROFILE_B64" | base64 -D > "$RUNNER_TEMP/camera.provisionprofile"
+          security find-identity -v -p codesigning "$keychain"
+
+      - name: Build, sign, notarize, and verify release ZIP
+        env:
+          TEAM_ID: HD342US4ZN
+          SIGN_IDENTITY: 'Developer ID Application: Billy Hedworth (HD342US4ZN)'
+          HOST_PROFILE: ${{ runner.temp }}/host.provisionprofile
+          EXT_PROFILE: ${{ runner.temp }}/camera.provisionprofile
+          NOTARY_APPLE_ID: bill.hedworth@gmail.com
+          NOTARY_PASSWORD: ${{ secrets.APPLE_NOTARY_PASSWORD }}
+          BUILD_NUMBER: ${{ inputs.build_number }}
+        run: ./scripts/release.sh
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: DroidDozeCam-macos-arm64-build-${{ inputs.build_number }}
+          path: dist/DroidDozeCam-macos-arm64.zip
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0

@@ -79,8 +79,9 @@ public final class FrameRenderer {
         CVBufferSetAttachment(pixel, kCVImageBufferCGColorSpaceKey, colorSpace, .shouldPropagate)
         return pixel
     }
-    public func convert(_ input: CVPixelBuffer, rotation: Int = 0, mirror: Bool = false, fit: FitMode = .fit) throws -> CVPixelBuffer {
-        if rotation == 0 && !mirror && CVPixelBufferGetWidth(input) == size.width && CVPixelBufferGetHeight(input) == size.height &&
+    public func convert(_ input: CVPixelBuffer, rotation: Int = 0, mirror: Bool = false, fit: FitMode = .fit, zoom: Double = 1) throws -> CVPixelBuffer {
+        guard zoom.isFinite && (1...4).contains(zoom) else { throw PhoneCamError.message("Zoom must be between 1 and 4.") }
+        if rotation == 0 && !mirror && zoom == 1 && CVPixelBufferGetWidth(input) == size.width && CVPixelBufferGetHeight(input) == size.height &&
             CVPixelBufferGetPixelFormatType(input) == VideoFrames.pixelFormat && CVPixelBufferGetIOSurface(input) != nil {
             return input // No CPU copy or GPU conversion when the buffer already matches.
         }
@@ -93,6 +94,14 @@ public final class FrameRenderer {
         if mirror {
             image = image.transformed(by: CGAffineTransform(a: -1, b: 0, c: 0, d: 1, tx: extent.width, ty: 0))
         }
+        if zoom > 1 {
+            let factor = CGFloat(zoom)
+            let crop = CGRect(x: extent.width * (1 - 1 / factor) / 2,
+                              y: extent.height * (1 - 1 / factor) / 2,
+                              width: extent.width / factor, height: extent.height / factor)
+            image = image.cropped(to: crop).transformed(by: CGAffineTransform(translationX: -crop.minX, y: -crop.minY))
+            extent = image.extent
+        }
         let sx = CGFloat(size.width) / extent.width, sy = CGFloat(size.height) / extent.height
         let scale = fit == .fill ? max(sx, sy) : min(sx, sy)
         image = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
@@ -101,6 +110,28 @@ public final class FrameRenderer {
             y: (CGFloat(size.height) - extent.height) / 2 - extent.minY))
         let black = CIImage(color: .black).cropped(to: bounds)
         return try render(image.composited(over: black).cropped(to: bounds))
+    }
+    /// Keep the person sharp and blur everything outside the Vision mask. A missing mask
+    /// blurs the whole frame while segmentation starts, so enabling the effect takes effect immediately.
+    public func blurBackground(_ input: CVPixelBuffer, mask: CVPixelBuffer?, radius: Int) throws -> CVPixelBuffer {
+        guard radius > 0 else { return input }
+        let foreground = CIImage(cvPixelBuffer: input).cropped(to: bounds)
+        let background = foreground.clampedToExtent()
+            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: radius])
+            .cropped(to: bounds)
+        guard let mask else { return try render(background) }
+        let rawMask = CIImage(cvPixelBuffer: mask)
+        let scaledMask = rawMask.transformed(by: CGAffineTransform(
+            scaleX: bounds.width / rawMask.extent.width,
+            y: bounds.height / rawMask.extent.height))
+        let softMask = scaledMask.clampedToExtent()
+            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 2])
+            .cropped(to: bounds)
+        let composited = foreground.applyingFilter("CIBlendWithMask", parameters: [
+            kCIInputBackgroundImageKey: background,
+            kCIInputMaskImageKey: softMask
+        ])
+        return try render(composited.cropped(to: bounds))
     }
     public func black() throws -> CVPixelBuffer {
         if let cachedBlack { return cachedBlack }

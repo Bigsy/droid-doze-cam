@@ -1,16 +1,20 @@
-# DroidDozeCam prototype
+# DroidDozeCam
 
-This is a local fork of [PhoneCam](https://github.com/wybaby168/phonecam) for a USB-connected Samsung phone. The USB camera stream works while the phone is locked and its display stays off.
+This is a local fork of [PhoneCam](https://github.com/wybaby168/phonecam) for USB-connected Android phones. The USB camera stream works while the tested Samsung phone is locked and its display stays off.
+
+For the planned Apple Silicon download, see the [GitHub release and installation guide](docs/RELEASE.md). The release pipeline produces an arm64, Developer ID signed, notarized app with its pinned scrcpy camera server. On first launch, **Camera Readiness…** checks the app, ADB, USB phone, login service, and camera extension. It can download ADB directly from Google with progress after you accept Google's SDK terms, or use an existing ADB. **Set Up Camera…** installs the login service and requests extension activation.
 
 ## DroidDozeCam camera prototype
 
 This fork's own camera extension appears to Mac apps as **DroidDozeCam**. It keeps the phone locked and its display off while a Mac app uses the camera. When the last Mac camera stream closes, it stops the USB video stream. If the phone's lock screen lit up during the call, it turns that screen off; it leaves an unlocked phone alone.
 
-The camera extension publishes a custom Core Media I/O device property (`wdmd`) that reads `1` while a Mac app streams the camera. `phonecam serve` polls it and starts the existing ADB/scrcpy USB capture and Core Media I/O frame sink on demand. The extension runs as `_cmiodalassistants`, so an App Group file would land in that account's container, not the user's; a property also reads as inactive if the extension exits, so a crash cannot leave capture running. The default capture target is 1080p at 60 fps and 20 Mbps. The phone was probed at 1080p/60 and 4K/60 over USB; the current Mac extension advertises up to 1080p/60.
+The camera extension publishes a custom Core Media I/O device property (`wdmd`) that reads `1` while a Mac app streams the camera. `phonecam serve` polls it and starts the existing ADB/scrcpy USB capture and Core Media I/O frame sink on demand. The extension runs as `_cmiodalassistants`, so an App Group file would land in that account's container, not the user's; a property also reads as inactive if the extension exits, so a crash cannot leave capture running. The default capture target is 1080p at 60 fps and 20 Mbps. The Mac extension advertises up to 4K/60 and 1080p/120. These are requested modes: a short S23 Ultra probe accepted both and produced 4K video at about 33 incoming fps for a 60 fps request, and 1080p video at about 66 incoming fps for a 120 fps request. Actual throughput depends on the phone, USB link, Mac, and receiving app.
 
 **Status:** Working end to end. The host app and camera extension are signed with the owner's Apple Development team, installed and approved. Photo Booth and Google Meet (Chrome) use DroidDozeCam; opening the camera starts USB capture from the S23 Ultra at 1080p with hardware decode, closing it stops capture, and Android stays in `Dozing` throughout. The core and CLI tests pass. See [the signing steps for this fork](docs/DROIDDOZECAM_SIGNING.md). No phone app or root access is needed.
 
-For a development build, run `./scripts/build.sh --unsigned`. Once the app and extension are correctly signed, run `./scripts/install.sh`, activate the extension with `droiddozecam install-extension`, then run `./scripts/install-service.sh USB_SERIAL` to start the on-demand service at login. `./scripts/uninstall-service.sh` removes the login service. `--demand-dir PATH` is available for local testing of `serve` with a `camera-demand.json` file instead of the extension. The build uses the independent bundle ID `com.hedworth.usbwakecam` and camera IDs, so it does not replace upstream PhoneCam. Those IDs predate the DroidDozeCam name and are kept because changing them needs new App IDs, provisioning profiles and extension approval.
+For a development build, run `./scripts/build.sh --unsigned`. Once the app and extension are correctly signed, run `./scripts/install.sh`, activate the extension with `droiddozecam install-extension`, then run `./scripts/install-service.sh USB_SERIAL` to start the on-demand service at login. Rerun `./scripts/install-service.sh NEW_SERIAL` when switching the service to a different phone; camera choices for each phone remain saved. `./scripts/uninstall-service.sh` removes the login service. `--demand-dir PATH` is available for local testing of `serve` with a `camera-demand.json` file instead of the extension. The build uses the independent bundle ID `com.hedworth.usbwakecam` and camera IDs, so it does not replace upstream PhoneCam. Those IDs predate the DroidDozeCam name and are kept because changing them needs new App IDs, provisioning profiles and extension approval.
+
+Open `DroidDozeCam.app` to get a menu bar icon, then choose **Settings…** to set resolution, requested frame rate, H.264 bitrate, Android camera, rotation (0°, 90°, 180°, or 270° clockwise), fit/fill, digital zoom/crop (1×–4×), horizontal mirroring, and background blur (off, light, medium, or strong). The camera menu asks the connected Android phone for its available IDs and facing (front, back, external); IDs are saved per USB phone so a different phone does not inherit the previous phone's ID. Android does not provide a universal wide/telephoto name in scrcpy's camera list, and some physical lenses may not be individually selectable. Settings are saved across launches. Rotation, framing, zoom, mirroring, and blur apply to an active stream within a second; capture changes restart it. Background blur uses Apple Vision person segmentation on the Mac's Neural Engine when supported, with a CPU fallback, and Core Image compositing on the Mac. Segmentation runs separately from the camera frame clock at up to 20 masks per second. Zoom is a Mac-side centre crop and does not switch phone lenses. 4K is limited to 60 fps, and 120 fps requests an exact-size Android high-speed camera mode which the phone may not support. The menu app can be closed without stopping the login service. Explicit CLI options override the corresponding saved settings for that command.
 
 On this Mac Xcode has generated development provisioning profiles for the signing team. `scripts/build.sh --signed` validates both profiles and produces `dist/DroidDozeCam.app`. Increase `BUILD_NUMBER` for each installed extension update. The signed app is installed at `/Applications/DroidDozeCam.app`.
 
@@ -82,7 +86,7 @@ cd phonecam
 ./scripts/setup-android.sh
 ```
 
-The installer places the app in `/Applications/PhoneCam.app` and the launcher in Homebrew’s `bin` directory when available. It preserves the previous app and requests administrator access only when directory permissions require it. Run capture as your normal user.
+The installer places the app in `/Applications/DroidDozeCam.app` and the launcher in Homebrew’s `bin` directory when available. It preserves the previous app and requests administrator access only when directory permissions require it. Run capture as your normal user.
 
 `setup-android.sh` downloads official **scrcpy-server 3.3.4** and checks its pinned SHA-256. OBS, Syphon, ADB and the server binary are not included in this repository. [Dependency notices](THIRD-PARTY-NOTICES.md)
 
@@ -146,7 +150,7 @@ phonecam doctor --json
 phonecam help
 ```
 
-Available bridge sizes: **640×480, 1280×720, 1920×1080**. Accepted frame rates: **15, 24, 25, 30, 60fps**, subject to the source device’s capabilities. The default is 720p30. Output resolution does not increase the source camera’s detail, and the receiving app may negotiate a different format.
+Available bridge sizes: **640×480, 1280×720, 1920×1080, 2560×1440, 3840×2160**. Accepted frame rates: **15, 24, 25, 30, 60, 120 fps**, subject to the source device’s capabilities; 4K is limited to 60 fps. The `run`/`preview` default is 720p30, while the on-demand service defaults to 1080p60 or saved menu settings. Output resolution does not increase the source camera’s detail, and the receiving app may negotiate a different format.
 
 `probe` reports captured/processed frame counts; a real preview is still needed to check image content, orientation and motion. `run` publishes to the project’s own **PhoneCam USB Camera** extension and requires the [signed build setup](docs/SIGNING.md). It is separate from the verified OBS path.
 
@@ -175,7 +179,7 @@ A bounded latest-frame buffer limits backlog. Android uses a pinned USB ADB tran
 - **macOS:** current product target. The local Apple Silicon build and Android + OBS path are verified. Intel is buildable from source but not validated on physical Intel hardware.
 - **Windows:** unsupported for now. A Windows compiler target cannot replace AVFoundation, Metal, AppKit and CoreMediaIO. A working port needs Windows capture, decoding, rendering and virtual-camera backends. [Windows assessment](docs/PLATFORMS.md)
 - **Linux:** portable core tests only; no camera app or virtual camera is shipped.
-- **Distribution:** source-first developer preview. Standalone extension signing, notarization, broader device/app testing and Homebrew packaging remain release gates.
+- **Distribution:** the arm64 GitHub release pipeline signs and notarizes the app. Developer ID signing and both provisioning profiles have been validated; notarization and clean-Mac installation testing remain before publishing an asset. Broader device/app testing remains to be done.
 
 ## Contribute
 

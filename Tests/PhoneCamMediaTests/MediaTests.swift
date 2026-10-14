@@ -33,6 +33,36 @@ final class MediaTests: XCTestCase {
         XCTAssertNotEqual(rgb(original, x: 40, y: 240), rgb(mirrored, x: 40, y: 240))
     }
 
+    func testZoomCropsTheCentreWithoutChangingOutputSize() throws {
+        let renderer = try FrameRenderer(size: .vga)
+        let original = try renderer.testPattern(frame: 0)
+        let zoomed = try renderer.convert(original, zoom: 2)
+        XCTAssertEqual(CVPixelBufferGetWidth(zoomed), 640)
+        XCTAssertEqual(CVPixelBufferGetHeight(zoomed), 480)
+        XCTAssertEqual(rgb(zoomed, x: 40, y: 240), rgb(original, x: 180, y: 240))
+        XCTAssertEqual(rgb(zoomed, x: 600, y: 240), rgb(original, x: 460, y: 240))
+        XCTAssertFalse(zoomed === original)
+        XCTAssertThrowsError(try renderer.convert(original, zoom: 5))
+    }
+
+    func testBackgroundBlurKeepsMaskedForegroundSharp() throws {
+        let renderer = try FrameRenderer(size: .vga)
+        let original = try renderer.testPattern(frame: 0)
+        var mask: CVPixelBuffer?
+        XCTAssertEqual(CVPixelBufferCreate(kCFAllocatorDefault, 2, 1,
+                                         kCVPixelFormatType_OneComponent8, nil, &mask), kCVReturnSuccess)
+        let personMask = try XCTUnwrap(mask)
+        CVPixelBufferLockBaseAddress(personMask, [])
+        let bytes = CVPixelBufferGetBaseAddress(personMask)!.assumingMemoryBound(to: UInt8.self)
+        bytes[0] = 255 // Left half is foreground.
+        bytes[1] = 0
+        CVPixelBufferUnlockBaseAddress(personMask, [])
+
+        let result = try renderer.blurBackground(original, mask: personMask, radius: 24)
+        XCTAssertEqual(rgb(result, x: 40, y: 200), rgb(original, x: 40, y: 200))
+        XCTAssertNotEqual(rgb(result, x: 400, y: 200), rgb(original, x: 400, y: 200))
+    }
+
     func testBlackFrameAndIOSurface() throws {
         let renderer = try FrameRenderer(size:.hd)
         let a = try renderer.black(), b = try renderer.black()

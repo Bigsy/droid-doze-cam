@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Assemble native app/system-extension metadata. No signing secrets are generated."""
 import argparse
+import hashlib
 import pathlib
 import plistlib
 import re
@@ -13,7 +14,18 @@ def write_plist(path, value):
         plistlib.dump(value, handle, sort_keys=True)
 
 
-def assemble(output, binary_dir, team, bundle_id, build_number):
+SCRCPY_VERSION = "3.3.4"
+SCRCPY_SHA256 = "8588238c9a5a00aa542906b6ec7e6d5541d9ffb9b5d0f6e1bc0e365e2303079e"
+SCRCPY_LICENSE_SHA256 = "5e6597827749877cca06765747bf29ed9205ed5021c6aec1ad42373711bcda05"
+
+
+def checked_copy(source, destination, expected_hash):
+    if hashlib.sha256(source.read_bytes()).hexdigest() != expected_hash:
+        raise ValueError(f"SHA-256 mismatch: {source}")
+    shutil.copy2(source, destination)
+
+
+def assemble(output, binary_dir, team, bundle_id, build_number, scrcpy_server=None, scrcpy_license=None):
     if not re.fullmatch(r"[A-Z0-9]{10}", team):
         raise ValueError("TEAM_ID must contain exactly 10 uppercase letters/digits")
     if not re.fullmatch(r"[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+", bundle_id):
@@ -51,6 +63,14 @@ def assemble(output, binary_dir, team, bundle_id, build_number):
     (app / "Contents/Resources").mkdir(parents=True, exist_ok=True)
     icon = pathlib.Path(__file__).resolve().parent.parent / "assets/PhoneCam.icns"
     shutil.copy2(icon, app / "Contents/Resources/PhoneCam.icns")
+    if (scrcpy_server is None) != (scrcpy_license is None):
+        raise ValueError("Provide both the scrcpy server and its license")
+    if scrcpy_server is not None:
+        resources = app / "Contents/Resources"
+        checked_copy(scrcpy_server, resources / f"scrcpy-server-v{SCRCPY_VERSION}", SCRCPY_SHA256)
+        checked_copy(scrcpy_license, resources / "scrcpy-LICENSE.txt", SCRCPY_LICENSE_SHA256)
+        shutil.copy2(pathlib.Path(__file__).resolve().parent.parent / "THIRD-PARTY-NOTICES.md",
+                     resources / "THIRD-PARTY-NOTICES.md")
     entitlement_base = {"com.apple.developer.team-identifier": team, "com.apple.security.application-groups": [group]}
     host_entitlements = dict(entitlement_base, **{
         "com.apple.application-identifier": team + "." + bundle_id,
@@ -71,8 +91,11 @@ if __name__ == "__main__":
     parser.add_argument("--team", required=True)
     parser.add_argument("--bundle-id", required=True)
     parser.add_argument("--build-number", default="1")
+    parser.add_argument("--scrcpy-server", type=pathlib.Path)
+    parser.add_argument("--scrcpy-license", type=pathlib.Path)
     args = parser.parse_args()
     try:
-        print(assemble(args.output, args.binaries, args.team, args.bundle_id, args.build_number))
+        print(assemble(args.output, args.binaries, args.team, args.bundle_id, args.build_number,
+                       args.scrcpy_server, args.scrcpy_license))
     except (ValueError, OSError) as error:
         parser.error(str(error))

@@ -21,17 +21,97 @@ final class ConfigurationTests: XCTestCase {
         }
     }
     func testRejectBadArguments() {
-        for args in [["wat"],["run","--fps","999"],["run","--size","1x2"],["run","--size","3840x2160"],["run","--duration","nan"],["run","--duration","inf"],["run","--bitrate","99999999999999999999999999M"],["run","--bitrate","0"],["run","--rotate","45"],["run","--fps"],["run","--mirror=true"],["run","--fps","30","--fps","60"],["run","--camera-id","0","--facing","front"],["run","--camera-id","0;id"],["run","--unknown","a"],["status","--source","test"],["run","--source","uvc","--serial","a"],["run","--device","x","--serial","y"]] {
+        for args in [["wat"],["run","--fps","999"],["run","--size","1x2"],["run","--size","3840x2160","--fps","120"],["run","--duration","nan"],["run","--duration","inf"],["run","--bitrate","99999999999999999999999999M"],["run","--bitrate","0"],["run","--rotate","45"],["run","--zoom","0.5"],["run","--zoom","nan"],["run","--fps"],["run","--mirror=true"],["run","--fps","30","--fps","60"],["run","--camera-id","0","--facing","front"],["run","--camera-id","0;id"],["run","--unknown","a"],["status","--source","test"],["run","--source","uvc","--serial","a"],["run","--device","x","--serial","y"]] {
             XCTAssertThrowsError(try Configuration.parse(args),"Should reject \(args)")
         }
     }
-    func testVideoSize() throws { XCTAssertEqual(try VideoSize("1280X720"),.hd); XCTAssertThrowsError(try VideoSize("1279x720")); XCTAssertThrowsError(try VideoSize("1280x720x2")) }
+    func testVideoSize() throws { XCTAssertEqual(try VideoSize("1280X720"),.hd); XCTAssertEqual(try VideoSize("2560x1440"),.qhd); XCTAssertThrowsError(try VideoSize("1279x720")); XCTAssertThrowsError(try VideoSize("1280x720x2")) }
     func testServeDefaultsToUSBAndRejectsPreviewOptions() throws {
         let c = try Configuration.parse(["serve", "--serial", "USB123"])
         XCTAssertEqual(c.source, .android); XCTAssertEqual(c.size, .fullHD); XCTAssertEqual(c.fps, 60)
         XCTAssertEqual(c.bitrate, 20_000_000)
         XCTAssertThrowsError(try Configuration.parse(["serve", "--syphon"]))
         XCTAssertThrowsError(try Configuration.parse(["probe", "--demand-dir", "/tmp"]))
+    }
+    func testTransformOverrides() throws {
+        let inherited = try Configuration.parse(["serve"])
+        XCTAssertFalse(inherited.rotationIsExplicit)
+        XCTAssertFalse(inherited.mirrorIsExplicit)
+        let overridden = try Configuration.parse(["serve", "--rotate", "0", "--no-mirror"])
+        XCTAssertTrue(overridden.rotationIsExplicit)
+        XCTAssertTrue(overridden.mirrorIsExplicit)
+        XCTAssertFalse(overridden.mirror)
+        XCTAssertThrowsError(try Configuration.parse(["serve", "--mirror", "--no-mirror"]))
+        XCTAssertEqual(try Configuration.parse(["serve", "--zoom", "1.5"]).zoom, 1.5)
+    }
+
+    func testHighResolutionAndHighFrameRateModes() throws {
+        XCTAssertEqual(try Configuration.parse(["serve", "--size", "2560x1440", "--fps", "60"]).captureSettings.size, .qhd)
+        XCTAssertEqual(try Configuration.parse(["serve", "--size", "3840x2160", "--fps", "60"]).captureSettings.size, .ultraHD)
+        XCTAssertEqual(try Configuration.parse(["serve", "--size", "1920x1080", "--fps", "120"]).captureSettings.fps, 120)
+        XCTAssertEqual(VideoSize.supported.prefix(4), [.hd, .fullHD, .vga, .ultraHD])
+        XCTAssertFalse(CameraCaptureSettings(size: .ultraHD, fps: 120, bitrate: 20_000_000, facing: "back").isSupported)
+    }
+
+    func testSavedCaptureRespectsExplicitOptions() throws {
+        let saved = CameraCaptureSettings(size: .ultraHD, fps: 60, bitrate: 40_000_000, facing: "front", cameraID: "1")
+        let inherited = try Configuration.parse(["serve"]).applyingSavedCapture(saved)
+        XCTAssertEqual(inherited.captureSettings, saved)
+        let override = try Configuration.parse(["serve", "--size", "1920x1080", "--fps", "120", "--facing", "back"])
+            .applyingSavedCapture(saved)
+        XCTAssertEqual(override.size, .fullHD)
+        XCTAssertEqual(override.fps, 120)
+        XCTAssertEqual(override.bitrate, 40_000_000)
+        XCTAssertEqual(override.facing, "back")
+        XCTAssertNil(override.cameraID)
+        XCTAssertEqual(try Configuration.parse(["serve", "--camera-id", "2"]).applyingSavedCapture(saved).cameraID, "2")
+        let highSpeed = CameraCaptureSettings(size: .fullHD, fps: 120, bitrate: 20_000_000, facing: "back")
+        XCTAssertEqual(try Configuration.parse(["serve", "--size", "3840x2160"]).applyingSavedCapture(highSpeed).fps, 60)
+        XCTAssertEqual(try Configuration.parse(["serve", "--fps", "120"]).applyingSavedCapture(saved).size, .fullHD)
+    }
+}
+
+final class AndroidCameraInfoTests: XCTestCase {
+    func testParsesPhoneReportedCameraIDsWithoutLensAssumptions() {
+        let output = """
+        List of cameras:
+          --camera-id=0    (back, 4080x3060)
+          --camera-id=1    (front, 4000x3000)
+          --camera-id=2    (back, 4000x3000)
+          --camera-id=3    (front, 3392x2544)
+        """
+        XCTAssertEqual(AndroidCameraInfo.parse(output).map { "\($0.facing):\($0.id)" },
+                       ["back:0", "front:1", "back:2", "front:3"])
+    }
+}
+
+final class CameraSettingsStoreTests: XCTestCase {
+    func testSettingsPersistAcrossStoreInstances() {
+        let suite = "DroidDozeCamTests.\(UUID().uuidString)"
+        let firstDefaults = UserDefaults(suiteName: suite)!
+        defer { firstDefaults.removePersistentDomain(forName: suite) }
+        let first = CameraSettingsStore(defaults: firstDefaults)
+        XCTAssertEqual(first.read(), CameraTransform(rotation: 0, mirror: false))
+        first.write(CameraTransform(rotation: 270, mirror: true, fit: .fill, zoom: 1.5,
+                                    backgroundBlur: true, blurRadius: 40))
+        let second = CameraSettingsStore(defaults: UserDefaults(suiteName: suite)!)
+        XCTAssertEqual(second.read(), CameraTransform(rotation: 270, mirror: true, fit: .fill, zoom: 1.5,
+                                                     backgroundBlur: true, blurRadius: 40))
+        let capture = CameraCaptureSettings(size: .qhd, fps: 60, bitrate: 40_000_000, facing: "front")
+        first.writeCapture(capture)
+        XCTAssertEqual(second.readCapture(), capture)
+        let phoneCamera = CameraCaptureSettings(size: .qhd, fps: 60, bitrate: 40_000_000, facing: "back", cameraID: "2")
+        first.writeCapture(phoneCamera, for: "PHONE_A")
+        XCTAssertEqual(second.readCapture(for: "PHONE_A"), phoneCamera)
+        XCTAssertNil(second.readCapture(for: "PHONE_B").cameraID)
+        XCTAssertEqual(second.readCapture(for: "PHONE_B").facing, "back")
+        XCTAssertNil(second.readCapture().cameraID)
+        let frontAuto = CameraCaptureSettings(size: .qhd, fps: 60, bitrate: 40_000_000, facing: "front")
+        first.writeCapture(frontAuto, for: "PHONE_B")
+        XCTAssertEqual(second.readCapture(for: "PHONE_B"), frontAuto)
+        XCTAssertEqual(second.readCapture(for: "PHONE_A"), phoneCamera)
+        firstDefaults.set(45, forKey: "camera.rotation")
+        XCTAssertEqual(second.read().rotation, 0)
     }
 }
 

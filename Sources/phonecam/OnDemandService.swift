@@ -43,6 +43,9 @@ enum OnDemandService {
         var capture = original
         capture.command = "run"
         capture.duration = nil
+        let settingsStore = CameraSettingsStore()
+        var desiredCapture = capture.applyingSavedCapture(settingsStore.readCapture(for: original.serial))
+        var nextSettingsRead = ProcessInfo.processInfo.systemUptime + 0.5
 
         let demand: () -> Bool
         if let path = original.demandDirectory {
@@ -53,13 +56,25 @@ enum OnDemandService {
         }
         log("Waiting for a Mac app to use \(Constants.cameraName). The phone screen stays dark.")
         var session: CaptureSession?
+        var activeSettings: CameraCaptureSettings?
         var activePhone: (adb: String, serial: String)?
         var stopping = false
         var nextAttempt = 0.0
         while !cancellation.isCancelled {
+            let now = ProcessInfo.processInfo.systemUptime
+            if now >= nextSettingsRead {
+                desiredCapture = capture.applyingSavedCapture(settingsStore.readCapture(for: original.serial))
+                nextSettingsRead = now + 0.5
+                if let running = session, !stopping, activeSettings != desiredCapture.captureSettings {
+                    log("Capture settings changed; restarting the USB stream.")
+                    running.stop()
+                    stopping = true
+                }
+            }
             let wanted = demand()
             if let running = session, running.isFinished {
                 session = nil
+                activeSettings = nil
                 if stopping, let phone = activePhone { PhoneScreen.sleepIfLocked(adb: phone.adb, serial: phone.serial) }
                 else { nextAttempt = ProcessInfo.processInfo.systemUptime + 2 }
                 activePhone = nil
@@ -68,11 +83,12 @@ enum OnDemandService {
             if wanted {
                 if session == nil && ProcessInfo.processInfo.systemUptime >= nextAttempt {
                     do {
-                        let selected = try CaptureRuntime.resolve(capture, cancellation: cancellation)
+                        let selected = try CaptureRuntime.resolve(desiredCapture, cancellation: cancellation)
                         guard let serial = selected.serial else { throw PhoneCamError.message("Choose an authorized USB Android phone.") }
                         let adb = try AndroidTools(selected).adb
                         log("Mac camera opened; starting USB capture from \(serial).")
                         activePhone = (adb, serial)
+                        activeSettings = desiredCapture.captureSettings
                         session = CaptureSession(configuration: selected)
                     } catch {
                         log("Waiting for USB phone: \(error.localizedDescription)")

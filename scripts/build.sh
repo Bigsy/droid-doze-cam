@@ -22,6 +22,9 @@ if [[ "$MODE" == --signed ]]; then
   : "${HOST_PROFILE:?Set HOST_PROFILE to the host .provisionprofile path}"
   : "${EXT_PROFILE:?Set EXT_PROFILE to the camera extension .provisionprofile path}"
   [[ "$TEAM_ID" != 0000000000 && -f "$HOST_PROFILE" && -f "$EXT_PROFILE" ]] || { echo "A real TEAM_ID and both profiles are required." >&2; exit 1; }
+  if [[ "${RELEASE_BUILD:-0}" == 1 && "$SIGN_IDENTITY" != 'Developer ID Application:'* ]]; then
+    echo "Release builds require a Developer ID Application signing identity." >&2; exit 1
+  fi
 fi
 # Staging is private and unique. Never merge unsigned files into an existing signed app.
 STAGE="$(mktemp -d "${TMPDIR:-/tmp}/phonecam-build.XXXXXX")"
@@ -43,7 +46,13 @@ else
   xcrun lipo -create "${HOST_BINARIES[@]}" -output "$STAGE/binaries/phonecam"
   xcrun lipo -create "${EXT_BINARIES[@]}" -output "$STAGE/binaries/PhoneCamCameraExtension"
 fi
-python3 "$ROOT/scripts/make-bundles.py" --output "$STAGE/bundle" --binaries "$STAGE/binaries" --team "$TEAM_ID" --bundle-id "$BUNDLE_ID" --build-number "$BUILD_NUMBER"
+BUNDLE_ARGS=()
+if [[ -n "${SCRCPY_SERVER:-}" || -n "${SCRCPY_LICENSE:-}" ]]; then
+  : "${SCRCPY_SERVER:?Set both SCRCPY_SERVER and SCRCPY_LICENSE}"
+  : "${SCRCPY_LICENSE:?Set both SCRCPY_SERVER and SCRCPY_LICENSE}"
+  BUNDLE_ARGS+=(--scrcpy-server "$SCRCPY_SERVER" --scrcpy-license "$SCRCPY_LICENSE")
+fi
+python3 "$ROOT/scripts/make-bundles.py" --output "$STAGE/bundle" --binaries "$STAGE/binaries" --team "$TEAM_ID" --bundle-id "$BUNDLE_ID" --build-number "$BUILD_NUMBER" "${BUNDLE_ARGS[@]}"
 APP="$STAGE/bundle/DroidDozeCam.app"
 EXT="$APP/Contents/Library/SystemExtensions/$BUNDLE_ID.camera.systemextension"
 if [[ "$MODE" == --signed ]]; then
@@ -53,8 +62,10 @@ if [[ "$MODE" == --signed ]]; then
   if ! security cms -D -i "$EXT_PROFILE" > "$STAGE/ext-profile.plist" 2>/dev/null; then
     openssl cms -verify -inform DER -in "$EXT_PROFILE" -noverify -out "$STAGE/ext-profile.plist" 2>/dev/null
   fi
-  python3 "$ROOT/scripts/check-profile.py" "$STAGE/host-profile.plist" "$STAGE/bundle/Host.entitlements"
-  python3 "$ROOT/scripts/check-profile.py" "$STAGE/ext-profile.plist" "$STAGE/bundle/Camera.entitlements"
+  PROFILE_ARGS=()
+  if [[ "${RELEASE_BUILD:-0}" == 1 ]]; then PROFILE_ARGS+=(--distribution); fi
+  python3 "$ROOT/scripts/check-profile.py" "${PROFILE_ARGS[@]}" "$STAGE/host-profile.plist" "$STAGE/bundle/Host.entitlements"
+  python3 "$ROOT/scripts/check-profile.py" "${PROFILE_ARGS[@]}" "$STAGE/ext-profile.plist" "$STAGE/bundle/Camera.entitlements"
   cp "$HOST_PROFILE" "$APP/Contents/embedded.provisionprofile"
   cp "$EXT_PROFILE" "$EXT/Contents/embedded.provisionprofile"
   TIMESTAMP_FLAG=--timestamp
@@ -79,4 +90,4 @@ cp "$STAGE/bundle/Host.entitlements" "$STAGE/bundle/Camera.entitlements" "$ROOT/
 printf '%s\n' "$MODE" > "$ROOT/dist/build-mode.txt"
 echo "Built: $ROOT/dist/DroidDozeCam.app ($ARCHS)"
 if [[ "$MODE" == --unsigned ]]; then echo "UNSIGNED DEVELOPMENT BUILD: local preview/probe are available; camera-extension activation requires a signed build."
-else echo "For release distribution, notarize/staple before installation. See docs/SIGNING.md."; fi
+else echo "For release distribution, notarize/staple before installation. See docs/RELEASE.md."; fi
