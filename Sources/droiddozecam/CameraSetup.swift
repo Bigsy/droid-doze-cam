@@ -169,9 +169,15 @@ final class CameraSetup: NSObject {
         return arguments[index + 1]
     }
 
+    /// Camera extension requests must come from an app in Applications; it may be renamed or in a subfolder.
+    nonisolated static var installedInApplications: Bool {
+        let app = Bundle.main.bundleURL
+        return app.path.hasPrefix("/Applications/") && app.pathExtension == "app"
+    }
+
     /// Runs several commands, so call it off the main thread.
     nonisolated static func readiness() -> CameraReadiness {
-        let installed = Bundle.main.bundleURL.path == "/Applications/DroidDozeCam.app"
+        let installed = installedInApplications
         let server = (try? AndroidTools.serverPath(Configuration())) != nil
         let adb = try? AndroidTools(Configuration())
         let service = (try? ProcessRunner.run("/bin/launchctl", ["print", "gui/\(getuid())/com.hedworth.droiddozecam.service"],
@@ -231,7 +237,7 @@ final class CameraSetup: NSObject {
     func begin() {
         do {
             let app = Bundle.main.bundleURL
-            guard app.path.hasPrefix("/Applications/"), app.pathExtension == "app" else {
+            guard Self.installedInApplications else {
                 throw DroidDozeCamError.message("Move DroidDozeCam.app into Applications, open it there, then choose Set Up Camera again.")
             }
             _ = try AndroidTools.serverPath(Configuration())

@@ -2,7 +2,18 @@ import Foundation
 import Darwin
 import DroidDozeCamCore
 
-func log(_ message: String) { FileHandle.standardError.write(Data(("[droiddozecam] " + message + "\n").utf8)) }
+/// A log file or pipe, such as the login service's log, gets the time on each line; a terminal stays compact.
+private let logHasTimestamps = isatty(STDERR_FILENO) == 0
+func log(_ message: String) {
+    var line = "[droiddozecam] " + message + "\n"
+    if logHasTimestamps {
+        var now = time(nil), parts = tm(), text = [CChar](repeating: 0, count: 32)
+        localtime_r(&now, &parts)
+        strftime(&text, text.count, "%Y-%m-%d %H:%M:%S ", &parts)
+        line = String(cString: text) + line
+    }
+    FileHandle.standardError.write(Data(line.utf8))
+}
 
 /// Per-user state shared by the service, the menu bar app and the CLI.
 let supportDirectory = FileManager.default.homeDirectoryForCurrentUser
@@ -36,9 +47,10 @@ enum ProcessRunner {
         process.waitUntilExit()
     }
     static func run(_ path: String, _ arguments: [String], timeout: Double = 15, cancellation: Cancellation? = nil, allowFailure: Bool = false) throws -> CommandResult {
-        let process = Process(), pipe = Pipe(), output = BoundedOutput(), finished = DispatchSemaphore(value:0)
+        let process = Process(), pipe = Pipe(), output = BoundedOutput(), finished = DispatchSemaphore(value:0), exited = DispatchSemaphore(value:0)
         process.executableURL = URL(fileURLWithPath:path); process.arguments = arguments
         process.standardInput = FileHandle.nullDevice; process.standardOutput = pipe; process.standardError = pipe
+        process.terminationHandler = { _ in exited.signal() }
         try process.run()
         try? pipe.fileHandleForWriting.close()
         DispatchQueue.global(qos:.utility).async {
@@ -47,9 +59,9 @@ enum ProcessRunner {
         }
         let deadline = ProcessInfo.processInfo.systemUptime + timeout
         var interrupted = false
-        while process.isRunning {
+        // Returns as soon as the command exits; a capture start runs several adb commands in a row.
+        while exited.wait(timeout:.now()+0.025) == .timedOut {
             if cancellation?.isCancelled == true || ProcessInfo.processInfo.systemUptime > deadline { interrupted = true; stop(process); break }
-            Thread.sleep(forTimeInterval:0.025)
         }
         process.waitUntilExit()
         _ = finished.wait(timeout:.now()+2)

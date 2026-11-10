@@ -23,6 +23,7 @@ The lease-file CLI test checks on-demand dispatch and termination. Actual test-p
 - Run the full local test suite and verify the signed host and extension work together.
 - Confirm upgrades from an earlier build preserve the login service, phone selection and camera approval.
 - Check live blur strength, capture settings, frame rate and immediate stop behavior.
+- Check frame pacing in a receiving app at 30 and 60 fps: motion stays even, with no skipped or bunched frames.
 - Confirm scrcpy 5.0.1 starts with the phone already locked and screen off, and recovers after USB reconnect and encoder/session resets.
 - Compare `droiddozecam cameras --json` with the phone's actual capture modes. Test Automatic and explicit source sizes, 30/60 fps and supported high-speed modes.
 - Test camera zoom at both ends of the reported range, torch on/off and available H.264 encoders. Confirm setting changes restart capture, a camera change resets lens-specific controls, and different phones keep separate settings.

@@ -48,8 +48,13 @@ final class TestCapture: CaptureSource {
 enum CaptureRuntime {
     /// Resolve ambiguity once. Reconnection must not silently switch to another person's phone.
     static func resolve(_ original: Configuration, cancellation: Cancellation) throws -> Configuration {
+        try resolvePhone(original, cancellation: cancellation).configuration
+    }
+    /// Also returns the Android phone that was selected; nil for other sources.
+    static func resolvePhone(_ original: Configuration, cancellation: Cancellation) throws -> (configuration: Configuration, phone: ADBDevice?) {
         var c = original
-        if c.source == .test { return c }
+        var phone: ADBDevice?
+        if c.source == .test { return (c, nil) }
         if c.serial != nil { c.source = .android }
         if c.source == .auto {
             let eligible = NativeDevices.all().filter { !NativeDevices.isOurs($0) && ($0.isContinuityCamera || NativeDevices.isUSB($0)) }
@@ -60,6 +65,7 @@ enum CaptureRuntime {
             let tools = try AndroidTools(c)
             let selected = try ADBDevice.select(tools.devices(cancellation: cancellation), serial: c.serial)
             c.serial = selected.serial
+            phone = selected
             c.serverPath = try AndroidTools.serverPath(c)
             let version = try ProcessRunner.run(tools.adb, ["-s", selected.serial, "shell", "getprop", "ro.build.version.sdk"], cancellation: cancellation).text
             guard let sdk = Int(version), sdk >= 31 else { throw DroidDozeCamError.message("USB ADB camera mode requires Android 12+. Native USB Webcam mode is an independent option when supported by the phone.") }
@@ -69,7 +75,7 @@ enum CaptureRuntime {
             // A probe may explicitly target the virtual camera without qualifying as a USB source.
             c.source = device.isContinuityCamera ? .continuity : (NativeDevices.isUSB(device) ? .uvc : .auto)
         }
-        return c
+        return (c, phone)
     }
     static func run(_ original: Configuration, cancellation: Cancellation, onProcessedFrame: ((CVPixelBuffer) -> Void)? = nil,
                     onEvent: ((CaptureEvent) -> Void)? = nil) throws -> RuntimeReport {
@@ -77,8 +83,9 @@ enum CaptureRuntime {
                 onProcessedFrame: onProcessedFrame, onEvent: onEvent)
     }
     /// Runs a configuration already checked by resolve, preserving the selected phone on reconnect.
+    /// `statsInterval` is the time between progress lines; the login service spaces them out to keep its log readable.
     static func run(resolved c: Configuration, cancellation: Cancellation, onProcessedFrame: ((CVPixelBuffer) -> Void)? = nil,
-                    onEvent: ((CaptureEvent) -> Void)? = nil) throws -> RuntimeReport {
+                    onEvent: ((CaptureEvent) -> Void)? = nil, statsInterval: Double = 2) throws -> RuntimeReport {
         let instance = c.command == "run" ? try InstanceLock() : nil
         defer { withExtendedLifetime(instance) {} }
         let renderer = try FrameRenderer(size: c.size)
@@ -162,7 +169,7 @@ enum CaptureRuntime {
                 do { try syphon.publish(privacyFrame); sentPrivacyFrame = true }
                 catch { failure.put(error.localizedDescription); cancellation.cancel() }
             }
-            if now - lastReport >= 2 {
+            if now - lastReport >= statsInterval {
                 let s = counters.snapshot()
                 log(String(format: "received=%llu processed=%llu queueDrops=%llu replaced=%llu avgInput=%.1ffps", s.0,s.1,s.2,mailbox.overwritten,Double(s.0)/max(0.001,now-started)))
                 if let syphon { log("Syphon client connected: \(syphon.hasClients)") }

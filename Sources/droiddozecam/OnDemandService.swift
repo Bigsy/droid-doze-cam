@@ -2,6 +2,8 @@ import Foundation
 import DroidDozeCamCore
 
 private final class CaptureSession {
+    /// A progress line every two seconds made up nearly all of the log and pushed real events out of it.
+    private static let statsInterval = 60.0
     let cancellation = Cancellation()
     private let stopRequest = Cancellation()
     private let finished = DispatchGroup()
@@ -13,8 +15,10 @@ private final class CaptureSession {
         DispatchQueue.global(qos: .userInitiated).async { [self] in
             defer { finished.leave() }
             do {
-                let report = try CaptureRuntime.run(resolved: configuration, cancellation: cancellation, onEvent: onEvent)
-                log(String(format: "USB capture stopped after %.1fs (%llu incoming frames).", report.elapsedSeconds, report.received))
+                let report = try CaptureRuntime.run(resolved: configuration, cancellation: cancellation, onEvent: onEvent,
+                                                    statsInterval: Self.statsInterval)
+                log(String(format: "USB capture stopped after %.1fs: received=%llu processed=%llu queueDrops=%llu replaced=%llu.",
+                           report.elapsedSeconds, report.received, report.processed, report.queueDrops, report.mailboxReplacements))
             } catch {
                 // The runtime also cancels itself when it gives up, for example on a stalled camera sink,
                 // so only a stop that serve asked for is quiet.
@@ -33,9 +37,11 @@ private final class CaptureSession {
 
 /// Publishes what serve is doing for the menu bar app, skipping repeats.
 private final class StatusReporter: @unchecked Sendable {
-    private let file = ServiceStatusFile(directory: supportDirectory)
+    private let file: ServiceStatusFile
     private let lock = NSLock()
     private var last: ServiceStatus?
+
+    init(directory: URL) { file = ServiceStatusFile(directory: directory) }
 
     func set(_ state: ServiceStatus.State, _ detail: String = "") {
         let status = ServiceStatus(state: state, detail: detail)
@@ -119,17 +125,25 @@ enum OnDemandService {
 
         let demand: () -> Bool?
         let requestedFrameRate: () -> Double?
+        // A development run keeps its status beside its demand file. In the shared location it replaced
+        // the login service's status, which the service does not write again until its state changes.
+        var statusDirectory = supportDirectory
         if let path = original.demandDirectory {
-            let file = CameraDemandFile(directory: URL(fileURLWithPath: (path as NSString).expandingTildeInPath, isDirectory: true))
+            let directory = URL(fileURLWithPath: (path as NSString).expandingTildeInPath, isDirectory: true)
+            let file = CameraDemandFile(directory: directory)
             demand = { file.current() }
             requestedFrameRate = { nil }
+            statusDirectory = directory
         } else {
             demand = VirtualCameraWriter.demand
             requestedFrameRate = VirtualCameraWriter.requestedFrameRate
         }
         var refresh = original.demandDirectory == nil ? CameraListRefresh() : nil
-        let status = StatusReporter()
+        let status = StatusReporter(directory: statusDirectory)
         defer { status.clear() }
+        // Says which build wrote the lines that follow.
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unbundled"
+        log("\(Constants.cameraName) \(Constants.version) (build \(build)) service started, PID \(ProcessInfo.processInfo.processIdentifier).")
         log("Waiting for a Mac app to use \(Constants.cameraName). The phone screen stays dark.")
         var policy = OnDemandPolicy()
         var session: CaptureSession?
@@ -169,7 +183,7 @@ enum OnDemandService {
                     do {
                         var matched = desiredCapture
                         matched.fps = desiredCapture.captureSettings.matching(requestedFPS: requestedFPS).fps
-                        let selected = try CaptureRuntime.resolve(matched, cancellation: cancellation)
+                        let (selected, device) = try CaptureRuntime.resolvePhone(matched, cancellation: cancellation)
                         let phone: String
                         if selected.source == .test {
                             phone = "Test pattern"
@@ -178,7 +192,7 @@ enum OnDemandService {
                         } else {
                             guard let serial = selected.serial else { throw DroidDozeCamError.message("Choose an authorized USB Android phone.") }
                             let tools = try AndroidTools(selected)
-                            phone = (try? tools.devices(cancellation: cancellation).first { $0.serial == serial }?.model) ?? serial
+                            phone = device?.model ?? serial
                             let rate = matched.fps == desiredCapture.fps ? "" : " at \(matched.fps) fps to match the app"
                             log("Mac camera opened; starting USB capture from \(serial)\(rate).")
                             activePhone = (tools.adb, serial)

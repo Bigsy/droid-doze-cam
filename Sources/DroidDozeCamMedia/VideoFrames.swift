@@ -44,21 +44,22 @@ public final class FrameRenderer {
     public let size: VideoSize
     public let usesMetal: Bool
     private let context: CIContext
-    private let metalBlur: MetalBlurCompositor?
+    private let device: MTLDevice?
+    /// Built for the first blurred frame: it compiles a shader and allocates textures, which the camera
+    /// extension, the preview window and captures without blur never use.
+    private lazy var metalBlur: MetalBlurCompositor? = device.flatMap { try? MetalBlurCompositor(device: $0, size: size) }
     private let pool: CVPixelBufferPool
     private let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
     private var cachedBlack: CVPixelBuffer?
     private let threshold = [kCVPixelBufferPoolAllocationThresholdKey: 8] as CFDictionary
     public init(size: VideoSize) throws {
         self.size = size
-        if let device = MTLCreateSystemDefaultDevice() {
-            usesMetal = true
+        device = MTLCreateSystemDefaultDevice()
+        usesMetal = device != nil
+        if let device {
             context = CIContext(mtlDevice: device, options: [.cacheIntermediates: false])
-            metalBlur = try? MetalBlurCompositor(device: device, size: size)
         } else {
-            usesMetal = false
             context = CIContext(options: [.cacheIntermediates: false])
-            metalBlur = nil
         }
         var pool: CVPixelBufferPool?
         let attributes: [String: Any] = [

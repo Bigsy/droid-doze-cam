@@ -50,6 +50,13 @@ User-facing changes are recorded here. The initial release is a developer previe
 - The camera extension stops the phone stream when a camera app exits without stopping its stream.
 - When the camera stays missing, the service restarts at most once every 10 minutes; it also rotates its log at 5 MB.
 - `build.sh` numbers each build with a timestamp by default, and always bundles the pinned scrcpy server; `install.sh` refuses a build without one.
+- The camera extension sends a phone frame that follows the previous one too closely after a short wait, instead of skipping it and leaving a gap of two frames. Not yet checked with a signed extension and a phone.
+- The service log has the time on each line and the app version and build at startup. It writes a progress line once a minute instead of every two seconds, and the frame counts when a capture stops.
+- Settings → Setup shows the app as installed wherever setup accepts it: renamed, or in a subfolder of Applications.
+- Capture starts slightly sooner: adb commands return as soon as they exit, the phone's model is not looked up twice, and the camera server is retried every 0.1 seconds.
+- Background blur is set up for the first blurred frame, not for every capture, the camera extension and the preview window.
+- The architecture and acceptance documents are in English, with the current camera name and the log subsystem the extension uses.
+- `serve --demand-dir` keeps its status beside its demand file, so the CLI tests no longer replace the login service's menu bar status.
 
 ### Removed
 

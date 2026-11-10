@@ -52,7 +52,8 @@ final class CameraDevice: NSObject, CMIOExtensionDeviceSource {
     private var convertedGeneration: UInt64 = UInt64.max
     private var converted: CVPixelBuffer?
     private var clock = MonotonicClock()
-    private var lastEmit: Double = 0
+    private var pacer = FramePacer()
+    private var pacedEmit: DispatchSourceTimer?
     private var lastErrorLog: Double = 0
     private static let demandProperty = CMIOExtensionProperty(rawValue: Constants.demandPropertyName)
     init(owner: CameraProvider) throws {
@@ -86,15 +87,30 @@ final class CameraDevice: NSObject, CMIOExtensionDeviceSource {
         sourceTimer?.cancel()
         let timer = DispatchSource.makeTimerSource(queue: owner.workQueue)
         timer.schedule(deadline: .now(), repeating: duration.seconds, leeway: .milliseconds(1))
-        timer.setEventHandler { [weak self] in self?.emitIfDue(newFrame: false) }; sourceTimer = timer; timer.resume()
+        timer.setEventHandler { [weak self] in self?.repeatIfDue() }; sourceTimer = timer; timer.resume()
     }
-    /// New producer frames go out on arrival, no faster than the client's frame duration; a timer of its own
-    /// would drift against the phone and repeat or skip frames. The timer repeats a frame once the producer
-    /// has been quiet for longer than a frame, and sends black at the full rate when there is no producer.
-    private func emitIfDue(newFrame: Bool) {
-        let elapsed = ProcessInfo.processInfo.systemUptime - lastEmit, period = output.duration.seconds
-        if newFrame || latest == nil ? elapsed >= period * 0.8 : elapsed >= period * 1.5 { emit() }
+    /// FramePacer holds the rules: new producer frames go out on arrival, an early one once the minimum
+    /// spacing has passed, and the timer repeats a frame or sends black while the producer is quiet.
+    private func repeatIfDue() {
+        if pacer.repeatDue(now: ProcessInfo.processInfo.systemUptime, period: output.duration.seconds, hasFrame: latest != nil) { emit() }
     }
+    private func frameArrived() {
+        switch pacer.frameArrived(now: ProcessInfo.processInfo.systemUptime, period: output.duration.seconds) {
+        case .emit: emit()
+        case .emitAfter(let delay):
+            cancelPacedEmit()
+            let timer = DispatchSource.makeTimerSource(queue: owner.workQueue)
+            timer.schedule(deadline: .now() + delay, leeway: .milliseconds(1))
+            timer.setEventHandler { [weak self] in
+                guard let self else { return }
+                self.cancelPacedEmit()
+                if self.pacer.delayEnded() { self.emit() }
+            }
+            pacedEmit = timer; timer.resume()
+        case nil: break
+        }
+    }
+    private func cancelPacedEmit() { pacedEmit?.cancel(); pacedEmit = nil }
     private func demandState(_ active: Bool) -> CMIOExtensionPropertyState<AnyObject> {
         CMIOExtensionPropertyState(value: (active ? "1" : "0") as NSString)
     }
@@ -109,6 +125,7 @@ final class CameraDevice: NSObject, CMIOExtensionDeviceSource {
         sourceUsers = max(0, sourceUsers - 1)
         if sourceUsers == 0 {
             sourceTimer?.cancel(); sourceTimer = nil; converted = nil; convertedGeneration = .max
+            cancelPacedEmit(); pacer = FramePacer()
             publishDemand(false)
         }
     }
@@ -133,7 +150,8 @@ final class CameraDevice: NSObject, CMIOExtensionDeviceSource {
                 let ns = clock.next(hostNanoseconds: Int64(VideoFrames.nanoseconds(VideoFrames.now)))
                 let sample = try VideoFrames.sample(pixel, time: CMTime(value: ns, timescale: 1_000_000_000), duration: output.duration)
                 output.stream.send(sample, discontinuity: [], hostTimeInNanoseconds: UInt64(ns))
-                lastEmit = ProcessInfo.processInfo.systemUptime
+                pacer.emitted(now: ProcessInfo.processInfo.systemUptime)
+                cancelPacedEmit()
             } catch { report(error) }
         }
     }
@@ -173,7 +191,7 @@ final class CameraDevice: NSObject, CMIOExtensionDeviceSource {
                        age.isFinite, age >= -0.25, age <= Constants.staleFrameSeconds {
                         self.latest = pixel; self.latestArrival = ProcessInfo.processInfo.systemUptime - max(0, age)
                         self.latestGeneration &+= 1
-                        if self.sourceUsers > 0 { self.emitIfDue(newFrame: true) }
+                        if self.sourceUsers > 0 { self.frameArrived() }
                     }
                     self.input.stream.notifyScheduledOutputChanged(CMIOExtensionScheduledOutput(
                         sequenceNumber: sequence, hostTimeInNanoseconds: VideoFrames.nanoseconds(VideoFrames.now)))

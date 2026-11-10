@@ -82,7 +82,7 @@ final class AndroidCapture: CaptureSource {
                 let dummy = try candidate.readExact(1,timeout:5)
                 guard dummy.first == 0 else { throw DroidDozeCamError.message("Invalid scrcpy handshake byte.") }
                 connected = candidate; break
-            } catch { cancellation.sleep(0.2) }
+            } catch { cancellation.sleep(0.1) }
         }
         guard let connection = connected else { throw DroidDozeCamError.message("Android camera server did not start. Check USB authorization, camera privacy toggle, Android version, and server logs above.") }
         _ = try StreamHeader(data: connection.readExact(4))

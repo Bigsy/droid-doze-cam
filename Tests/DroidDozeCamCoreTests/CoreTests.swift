@@ -271,6 +271,85 @@ final class OnDemandPolicyTests: XCTestCase {
     }
 }
 
+final class FramePacerTests: XCTestCase {
+    let period = 1.0 / 30
+    private func afterAFrame(at time: Double) -> FramePacer {
+        var pacer = FramePacer()
+        XCTAssertEqual(pacer.frameArrived(now: time, period: period), .emit)
+        pacer.emitted(now: time)
+        return pacer
+    }
+
+    func testOnTimeFramesGoOutOnArrival() {
+        var pacer = afterAFrame(at: 100)
+        XCTAssertEqual(pacer.frameArrived(now: 100 + period, period: period), .emit)
+        pacer.emitted(now: 100 + period)
+        XCTAssertEqual(pacer.frameArrived(now: 100 + period * 1.8, period: period), .emit)
+    }
+    func testAnEarlyFrameWaitsForTheMinimumSpacingInsteadOfBeingSkipped() throws {
+        var pacer = afterAFrame(at: 100)
+        guard case .emitAfter(let delay) = pacer.frameArrived(now: 100 + period * 0.5, period: period) else {
+            return XCTFail("An early frame must wait, not go out or be dropped.")
+        }
+        XCTAssertEqual(delay, period * 0.3, accuracy: 1e-9)
+        XCTAssertTrue(pacer.delayEnded())
+        XCTAssertFalse(pacer.delayEnded())
+    }
+    func testANewerFrameTakesTheWaitingFramesPlace() {
+        var pacer = afterAFrame(at: 100)
+        XCTAssertNotNil(pacer.frameArrived(now: 100 + period * 0.2, period: period))
+        XCTAssertNil(pacer.frameArrived(now: 100 + period * 0.4, period: period))
+        XCTAssertTrue(pacer.delayEnded())
+    }
+    func testAFrameSentMeanwhileEndsTheWait() {
+        var pacer = afterAFrame(at: 100)
+        XCTAssertNotNil(pacer.frameArrived(now: 100 + period * 0.7, period: period))
+        pacer.emitted(now: 100 + period * 0.75)
+        XCTAssertFalse(pacer.delayEnded())
+        XCTAssertNotNil(pacer.frameArrived(now: 100 + period, period: period))
+    }
+    func testTheTimerRepeatsAQuietProducerAndSendsBlackAtTheFullRate() {
+        let pacer = afterAFrame(at: 100)
+        XCTAssertFalse(pacer.repeatDue(now: 100 + period * 1.4, period: period, hasFrame: true))
+        XCTAssertTrue(pacer.repeatDue(now: 100 + period * 1.6, period: period, hasFrame: true))
+        XCTAssertFalse(pacer.repeatDue(now: 100 + period * 0.7, period: period, hasFrame: false))
+        XCTAssertTrue(pacer.repeatDue(now: 100 + period * 0.9, period: period, hasFrame: false))
+    }
+    /// Frames from the phone arrive up to 6 ms early or late. Driven the way the camera extension drives
+    /// the pacer, every frame must reach the app, at least the minimum spacing apart and barely delayed.
+    func testJitterNeitherSkipsNorBunchesFrames() {
+        var pacer = FramePacer(), state: UInt64 = 42
+        var waitingUntil: Double?, newest = -1, sent = -1, delivered = 0
+        var lastEmit: Double?, smallestGap = Double.infinity, longestDelay = 0.0
+        var arrivals: [Double] = []
+        func emit(at time: Double) {
+            if newest != sent { delivered += 1; longestDelay = max(longestDelay, time - arrivals[newest]) }
+            if let lastEmit { smallestGap = min(smallestGap, time - lastEmit) }
+            sent = newest; lastEmit = time; waitingUntil = nil
+            pacer.emitted(now: time)
+        }
+        for frame in 0..<20_000 {
+            state = state &* 6364136223846793005 &+ 1442695040888963407
+            let jitter = (Double(state >> 11) / Double(1 << 53) - 0.5) * 0.012
+            let time = 100 + Double(frame) * period + jitter
+            arrivals.append(time)
+            if let due = waitingUntil, due <= time {
+                waitingUntil = nil
+                if pacer.delayEnded() { emit(at: due) }
+            }
+            newest = frame
+            switch pacer.frameArrived(now: time, period: period) {
+            case .emit: emit(at: time)
+            case .emitAfter(let delay): waitingUntil = time + delay
+            case nil: break
+            }
+        }
+        XCTAssertGreaterThanOrEqual(delivered, arrivals.count - 1) // The last frame may still be waiting.
+        XCTAssertGreaterThanOrEqual(smallestGap, period * FramePacer.minimumSpacing - 1e-9)
+        XCTAssertLessThan(longestDelay, 0.012)
+    }
+}
+
 final class ServiceStatusTests: XCTestCase {
     func testRoundTripAndOnlyTheOwnerRemovesIt() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
