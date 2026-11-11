@@ -139,7 +139,7 @@ struct DroidDozeCamMain {
             if c.command == "menu" {
                 menuBar = MenuBarApp()
             } else if c.command == "install-extension" || c.command == "uninstall-extension" {
-                let task = ExtensionManager(activate:c.command == "install-extension") { exit($0) }
+                let task = ExtensionManager(activate:c.command == "install-extension", force:c.force) { exit($0) }
                 manager = task
                 do { try task.submit() } catch { log(error.localizedDescription); exit(1) }
             } else {
@@ -170,7 +170,8 @@ struct DroidDozeCamMain {
     droiddozecam doctor [--json]                Inspect permissions, code signatures, GPU and USB prerequisites
     droiddozecam status [--json]                Inspect extension registration and virtual camera visibility
     droiddozecam menu                           Show the menu bar settings app (also opens from Finder)
-    droiddozecam install-extension             Activate the signed, bundled camera system extension (approval required)
+    droiddozecam install-extension [--force]   Activate the signed, bundled camera system extension (approval required);
+                                               refuses to replace one that is still running unless forced
     droiddozecam uninstall-extension           Request extension deactivation (may require a reboot)
     droiddozecam run [OPTIONS]                  Publish to "\(Constants.cameraName)"; Ctrl+C stops
     droiddozecam serve [OPTIONS]                Start USB capture only while a Mac app uses the camera
@@ -183,6 +184,7 @@ struct DroidDozeCamMain {
       --source auto|continuity|uvc|android|test  Default: auto; never automatically selects another virtual camera
       --device ID_OR_NAME                      Native selector; probe/preview may explicitly select DroidDozeCam for testing
       --serial USB_SERIAL                      Android USB selector; wireless ADB is rejected
+                                               (serve without it follows the phones chosen in Set Up Camera)
       --size 640x480|1280x720|1920x1080|2560x1440|3840x2160  Bridge size; default 720p (serve: saved setting or 1080p)
       --fps 15|24|25|30|60|120                  Requested frame rate; 4K up to 60, 120 needs a high-speed camera mode
       --bitrate 8M                             Android H.264 bitrate; default 8M (serve: saved setting or 20M)

@@ -58,6 +58,14 @@ final class CameraZoomControl: NSControl, NSTextFieldDelegate {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    /// For a menu, which cannot take typing: the readout only shows the ratio.
+    func showReadoutOnly() {
+        readout.isEditable = false
+        readout.isSelectable = false
+        readout.isBordered = false
+        readout.drawsBackground = false
+    }
+
     func configure(minimum: Double, maximum: Double, selected: Double) {
         slider.minValue = minimum
         slider.maxValue = maximum

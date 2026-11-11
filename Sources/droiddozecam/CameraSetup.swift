@@ -162,11 +162,35 @@ final class CameraSetup: NSObject {
         return status.text.contains("Virtual camera visible: true")
     }
 
-    /// The phone the login service captures from.
-    nonisolated static var serviceSerial: String? {
+    /// A login service installed before the service followed phones names its one phone as `--serial`.
+    nonisolated private static var pinnedSerial: String? {
         guard let plist = NSDictionary(contentsOf: servicePlist), let arguments = plist["ProgramArguments"] as? [String],
               let index = arguments.firstIndex(of: "--serial"), arguments.indices.contains(index + 1) else { return nil }
         return arguments[index + 1]
+    }
+
+    /// The phones the login service captures from, the one it prefers first.
+    nonisolated static var knownPhones: [String] {
+        var phones = CameraSettingsStore().knownPhones()
+        if let pinned = pinnedSerial, !phones.contains(pinned) { phones.append(pinned) }
+        return phones
+    }
+
+    /// The phone a running capture uses, from the service's status; nil while it is idle or has exited.
+    nonisolated static func phoneInUse(_ status: ServiceStatus?) -> String? {
+        guard let status, kill(status.pid, 0) == 0 else { return nil }
+        return status.serial
+    }
+
+    /// The phone whose saved camera choices apply to the next picture: the one in use, else the set-up
+    /// phone that is plugged in, else the one the service prefers. Lists USB devices, so call it off the main thread.
+    nonisolated static func currentPhone(_ status: ServiceStatus?) -> String? {
+        if let serial = phoneInUse(status) { return serial }
+        let known = knownPhones
+        if let devices = try? AndroidTools(Configuration()).devices(), let phone = try? ADBDevice.select(devices, known: known) {
+            return phone.serial
+        }
+        return known.first
     }
 
     /// Camera extension requests must come from an app in Applications; it may be renamed or in a subfolder.
@@ -187,13 +211,16 @@ final class CameraSetup: NSObject {
         var phoneDetail = "Connect with a USB data cable"
         if let adb {
             do {
-                let serial = serviceSerial
-                let devices = try adb.devices().filter { $0.isUSB && (serial == nil || $0.serial == serial) }
+                let known = knownPhones
+                let usb = try adb.devices().filter(\.isUSB)
+                let devices = usb.filter { known.isEmpty || known.contains($0.serial) }
                 if let ready = devices.first(where: { $0.state == "device" }) {
                     phoneReady = true
                     phoneDetail = ready.model ?? "Connected and authorized"
                 } else if devices.contains(where: { $0.state == "unauthorized" }) {
                     phoneDetail = "Allow USB debugging on your phone"
+                } else if let other = usb.first(where: { $0.state == "device" }) {
+                    phoneDetail = "\(other.model ?? "This phone") is new: choose Set Up Camera to use it"
                 }
             } catch { phoneDetail = "Could not check connection" }
         } else { phoneDetail = "Install ADB first" }
@@ -247,10 +274,27 @@ final class CameraSetup: NSObject {
                 throw DroidDozeCamError.message("Connect an Android 12+ phone with a USB data cable, enable USB debugging, and accept the authorization prompt on the phone. Then choose Set Up Camera again.")
             }
             let serial = try chooseDevice(devices)
-            try installService(serial: serial, app: app)
+            guard !serial.isEmpty, serial.utf8.allSatisfy({
+                (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || [45, 46, 58, 95].contains($0)
+            }) else { throw DroidDozeCamError.message("Invalid USB phone serial.") }
+            // A device with no usable camera would become the preferred phone and never give a picture.
+            // Any other failure to list cameras is left to show when capture starts.
+            do { _ = try tools.cameras(serial: serial) }
+            catch let error as DroidDozeCamError where error == AndroidTools.noCameras {
+                let name = devices.first(where: { $0.serial == serial })?.model ?? "This device"
+                throw DroidDozeCamError.message("\(name) has no camera that DroidDozeCam can use, so it was not set up.")
+            } catch {}
+            // Remember the phones before the service stops naming one, so it never runs without a list:
+            // with no list it would use any authorized phone.
+            let store = CameraSettingsStore()
+            if let pinned = Self.pinnedSerial { store.rememberPhone(pinned) }
+            store.rememberPhone(serial)
+            try installService(app: app)
             onStatusChanged?()
             if Self.cameraVisible() {
-                show("Camera ready", "DroidDozeCam is already available to Mac apps. The login service has been refreshed for USB phone \(serial).")
+                let others = store.knownPhones().count - 1
+                let also = others == 0 ? "" : " It also uses the \(others == 1 ? "other phone" : "\(others) other phones") you set up, whichever is plugged in."
+                show("Camera ready", "DroidDozeCam is available to Mac apps and uses USB phone \(serial).\(also)")
                 return
             }
             let manager = ExtensionManager(activate: true) { [weak self] result in
@@ -300,6 +344,7 @@ final class CameraSetup: NSObject {
                                           timeout: 5, allowFailure: true)
                 try FileManager.default.removeItem(at: destination)
             }
+            CameraSettingsStore().forgetPhones()
             let manager = ExtensionManager(activate: false) { [weak self] result in
                 DispatchQueue.main.async {
                     self?.extensionManager = nil
@@ -336,10 +381,8 @@ final class CameraSetup: NSObject {
         return devices[selector.indexOfSelectedItem].serial
     }
 
-    private func installService(serial: String, app: URL) throws {
-        guard !serial.isEmpty, serial.utf8.allSatisfy({
-            (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || [45, 46, 58, 95].contains($0)
-        }) else { throw DroidDozeCamError.message("Invalid USB phone serial.") }
+    /// The service names no phone: it follows whichever phone from Set Up Camera is plugged in.
+    private func installService(app: URL) throws {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let agents = home.appendingPathComponent("Library/LaunchAgents", isDirectory: true)
         let logs = home.appendingPathComponent("Library/Logs", isDirectory: true)
@@ -351,7 +394,7 @@ final class CameraSetup: NSObject {
         let log = logs.appendingPathComponent("DroidDozeCam.log").path
         let plist: [String: Any] = [
             "Label": label,
-            "ProgramArguments": [executable, "serve", "--source", "android", "--serial", serial],
+            "ProgramArguments": [executable, "serve", "--source", "android"],
             "RunAtLoad": true,
             "KeepAlive": true,
             // launchd's default policy throttles the frame timers; capture must keep the camera's frame rate.

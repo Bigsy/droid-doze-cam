@@ -9,14 +9,17 @@ private final class CaptureSession {
     private let finished = DispatchGroup()
     /// Why the session ended when serve did not stop it. Read only once isFinished is true.
     private(set) var failure: String?
+    private let control: LiveCameraControl?
 
     init(configuration: Configuration, onEvent: @escaping (CaptureEvent) -> Void) {
+        control = configuration.source == .android
+            ? LiveCameraControl(zoom: configuration.cameraZoom, torch: configuration.cameraTorch) : nil
         finished.enter()
         DispatchQueue.global(qos: .userInitiated).async { [self] in
             defer { finished.leave() }
             do {
                 let report = try CaptureRuntime.run(resolved: configuration, cancellation: cancellation, onEvent: onEvent,
-                                                    statsInterval: Self.statsInterval)
+                                                    statsInterval: Self.statsInterval, liveControl: control)
                 log(String(format: "USB capture stopped after %.1fs: received=%llu processed=%llu queueDrops=%llu replaced=%llu.",
                            report.elapsedSeconds, report.received, report.processed, report.queueDrops, report.mailboxReplacements))
             } catch {
@@ -31,6 +34,8 @@ private final class CaptureSession {
     }
 
     var isFinished: Bool { finished.wait(timeout: .now()) == .success }
+    /// Changes phone zoom and torch on the running capture. False when that needs a restart.
+    func adjust(zoom: Double, torch: Bool) -> Bool { control?.set(zoom: zoom, torch: torch) ?? false }
     func stop() { stopRequest.cancel(); cancellation.cancel() }
     func wait() { finished.wait() }
 }
@@ -43,8 +48,8 @@ private final class StatusReporter: @unchecked Sendable {
 
     init(directory: URL) { file = ServiceStatusFile(directory: directory) }
 
-    func set(_ state: ServiceStatus.State, _ detail: String = "") {
-        let status = ServiceStatus(state: state, detail: detail)
+    func set(_ state: ServiceStatus.State, _ detail: String = "", serial: String? = nil) {
+        let status = ServiceStatus(state: state, detail: detail, serial: serial)
         lock.lock(); defer { lock.unlock() }
         guard status != last else { return }
         last = status
@@ -120,7 +125,11 @@ enum OnDemandService {
         capture.command = "run"
         capture.duration = nil
         let settingsStore = CameraSettingsStore()
-        var desiredCapture = capture.applyingSavedCapture(settingsStore.readCapture(for: original.serial))
+        let loginService = ProcessInfo.processInfo.environment["XPC_SERVICE_NAME"] == "com.hedworth.droiddozecam.service"
+        // Without --serial the service follows whichever set-up phone is plugged in. Camera choices are
+        // saved per phone, so they are read for the phone in use, else the one set up last.
+        var phoneSerial = original.serial ?? settingsStore.knownPhones().first
+        var desiredCapture = capture.applyingSavedCapture(settingsStore.readCapture(for: phoneSerial))
         var nextSettingsRead = ProcessInfo.processInfo.systemUptime + 0.5
 
         let demand: () -> Bool?
@@ -154,7 +163,7 @@ enum OnDemandService {
         while !cancellation.isCancelled {
             let now = ProcessInfo.processInfo.systemUptime
             if now >= nextSettingsRead {
-                desiredCapture = capture.applyingSavedCapture(settingsStore.readCapture(for: original.serial))
+                desiredCapture = capture.applyingSavedCapture(settingsStore.readCapture(for: phoneSerial))
                 nextSettingsRead = now + 0.5
             }
             let reading = demand()
@@ -171,6 +180,13 @@ enum OnDemandService {
             var finished: CaptureSession?
             if let running = session, running.isFinished { finished = running; session = nil }
             if wanted, let failure = finished?.failure { status.set(.problem, failure) }
+            // Phone zoom and torch change on the running capture when it has a control channel;
+            // otherwise the policy below restarts capture for them, as for any other setting.
+            let target = desiredCapture.captureSettings
+            if wanted, let running = session, let active = policy.adjustableSettings, active != target,
+               active.sameExceptCameraControls(as: target), running.adjust(zoom: target.cameraZoom, torch: target.cameraTorch) {
+                policy.adjusted(to: target)
+            }
             for action in policy.update(now: now, wanted: wanted, desired: desiredCapture.captureSettings,
                                         requestedFPS: requestedFPS, sessionFinished: finished != nil) {
                 switch action {
@@ -181,9 +197,26 @@ enum OnDemandService {
                     if let phone = activePhone { PhoneScreen.sleepIfLocked(adb: phone.adb, serial: phone.serial) }
                 case .start:
                     do {
+                        var chosen: ADBDevice?
+                        if capture.source == .android && original.serial == nil {
+                            let known = settingsStore.knownPhones()
+                            // Run by hand, serve uses the only authorized phone. The login service needs
+                            // its list: without one it would capture from any phone that is plugged in.
+                            if known.isEmpty && loginService {
+                                throw DroidDozeCamError.message("No phone has been set up. Open Settings, then Setup, and choose Set Up Camera.")
+                            }
+                            let devices = try AndroidTools(capture).devices(cancellation: cancellation)
+                            let phone = try ADBDevice.select(devices, known: known)
+                            chosen = phone
+                            if phone.serial != phoneSerial {
+                                phoneSerial = phone.serial
+                                desiredCapture = capture.applyingSavedCapture(settingsStore.readCapture(for: phoneSerial))
+                            }
+                        }
                         var matched = desiredCapture
+                        matched.serial = chosen?.serial ?? matched.serial
                         matched.fps = desiredCapture.captureSettings.matching(requestedFPS: requestedFPS).fps
-                        let (selected, device) = try CaptureRuntime.resolvePhone(matched, cancellation: cancellation)
+                        let (selected, device) = try CaptureRuntime.resolvePhone(matched, cancellation: cancellation, preselected: chosen)
                         let phone: String
                         if selected.source == .test {
                             phone = "Test pattern"
@@ -197,13 +230,14 @@ enum OnDemandService {
                             log("Mac camera opened; starting USB capture from \(serial)\(rate).")
                             activePhone = (tools.adb, serial)
                         }
-                        status.set(.starting, phone)
+                        let serial = selected.serial
+                        status.set(.starting, phone, serial: serial)
                         lastWait = nil
                         policy.started(desiredCapture.captureSettings, fps: matched.fps)
                         session = CaptureSession(configuration: selected) { event in
                             switch event {
-                            case .receiving: status.set(.streaming, phone)
-                            case .reconnecting(let reason): status.set(.reconnecting, reason)
+                            case .receiving: status.set(.streaming, phone, serial: serial)
+                            case .reconnecting(let reason): status.set(.reconnecting, reason, serial: serial)
                             }
                         }
                     } catch {

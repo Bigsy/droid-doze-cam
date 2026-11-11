@@ -24,12 +24,17 @@ User-facing changes are recorded here. The initial release is a developer previe
 - Pin the official scrcpy 5.0.1 server and license with updated SHA-256 checksums.
 - Parse the new stream/session headers and packet flags; reset the decoder and timing when a new session begins.
 - Discover camera source sizes, frame rates, zoom ranges and H.264 encoders in Settings and the new `cameras` CLI command.
-- Add per-phone source size, camera zoom, torch and encoder settings. Phone controls restart capture; camera zoom applies on slider release. Keep live Mac crop and blur separate.
+- Add per-phone source size, camera zoom, torch and encoder settings. Camera, source size and encoder changes restart capture; camera zoom applies on slider release. Keep live Mac crop and blur separate.
 - Match automatic source aspect ratio to the selected output, including 4:3 VGA.
 - Local builds, automated checks and a short USB capture probe passed; full device validation is tracked in `docs/VERIFICATION.md`.
 
 ### Added
 
+- Phone zoom and torch change on the running picture instead of restarting capture, through the scrcpy control channel. The picture zooms in steps of about 6%, so it can be up to about 3% off the chosen ratio until capture next starts. If the channel gives no video on a phone, capture starts without it and these settings restart capture as before. Checked on one phone: it stayed asleep and locked through a short capture, and torch changes were seen on a running capture in the signed app.
+- The login service follows the phones chosen in Set Up Camera: it uses whichever is plugged in, the one set up last when several are, each with its own camera choices. A phone that was never set up is not used, and Set Up Camera refuses a device with no usable camera. A service installed by an earlier build keeps its single phone until Set Up Camera runs again. The choice of phone was checked with two devices attached; switching between two phones with cameras has not been checked.
+- Menu bar items for mirroring, background blur, torch and switching between the front and back camera, and a phone zoom slider in the menu.
+- `droiddozecam install-extension` refuses to replace a camera extension whose process is still running, which could leave Mac apps without the camera until a newer build or a restart; `--force` replaces it regardless. `install.sh` says how to free a running extension, and after replacing one it waits until Mac apps can see the camera before the login service restarts.
+- **Show preview** tick box in Settings: a live picture of what Mac apps receive, above the tabs, for judging rotation, mirroring, crop, blur and zoom without opening another app. The phone camera runs while it is ticked, and it is unticked each time Settings opens. Opening it while another app is in a call has not been checked.
 - Smooth phone zoom slider with an editable live readout, shorter Capture guidance, and a compact Setup checklist with grouped actions.
 
 - On-demand `serve` login service: USB capture starts when a Mac app opens the DroidDozeCam camera and stops when it closes, with the phone kept locked and dark.

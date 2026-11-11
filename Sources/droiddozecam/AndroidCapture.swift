@@ -5,6 +5,8 @@ import DroidDozeCamCore
 
 struct AndroidTools {
     static let savedADBPathKey = "setup.adbPath"
+    /// The device answered and has no camera the server can open, such as a tablet without one.
+    static let noCameras = DroidDozeCamError.message("Android reported no selectable cameras.")
     let adb: String
     init(_ c: Configuration) throws {
         if let explicit = c.adbPath {
@@ -30,7 +32,7 @@ struct AndroidTools {
         let output = try ProcessRunner.run(adb, prefix + ["shell", "CLASSPATH=\(remote)", "app_process", "/",
             "com.genymobile.scrcpy.Server", Constants.scrcpyVersion, "list_cameras=true", "list_camera_sizes=true", "list_encoders=true", "audio=false"], timeout: 20, cancellation: cancellation).text
         let cameras = AndroidCameraInfo.parse(output)
-        guard !cameras.isEmpty else { throw DroidDozeCamError.message("Android reported no selectable cameras.") }
+        guard !cameras.isEmpty else { throw Self.noCameras }
         return (device, cameras, AndroidVideoEncoder.parse(output))
     }
     static func serverPath(_ c: Configuration) throws -> String {
@@ -52,9 +54,98 @@ struct AndroidTools {
     }
 }
 
+/// Phone zoom and torch for one capture session. The login service changes them here; a running Android
+/// capture sends them over scrcpy's control channel, and a reconnect starts from the latest values.
+final class LiveCameraControl: @unchecked Sendable {
+    private static let phonesLock = NSLock()
+    private static var phonesWithoutControl = Set<String>()
+    /// The control channel gave no video on this phone, so captures start without it until the service restarts.
+    static func isDisabled(for serial: String) -> Bool {
+        phonesLock.lock(); defer { phonesLock.unlock() }
+        return phonesWithoutControl.contains(serial)
+    }
+    static func disable(for serial: String) {
+        phonesLock.lock(); defer { phonesLock.unlock() }
+        if phonesWithoutControl.insert(serial).inserted {
+            log("Live zoom and torch are unavailable on this phone; changing them restarts capture.")
+        }
+    }
+
+    private let lock = NSLock()
+    private var zoom: Double
+    private var torch: Bool
+    private var connection: USBConnection?
+    /// What the phone has now. Zoom messages move in steps, so this can differ slightly from `zoom`.
+    private var phoneZoom: Float = 1
+    private var phoneTorch = false
+
+    init(zoom: Double, torch: Bool) { self.zoom = zoom; self.torch = torch }
+
+    var values: (zoom: Double, torch: Bool) { lock.lock(); defer { lock.unlock() }; return (zoom, torch) }
+
+    /// The phone is streaming with `zoom` and `torch` and takes changes on `connection`. The server drops
+    /// messages that arrive before its camera session exists, so attach only once video flows.
+    func attach(_ connection: USBConnection, zoom: Double, torch: Bool) {
+        lock.lock(); defer { lock.unlock() }
+        self.connection = connection; phoneZoom = Float(zoom); phoneTorch = torch
+    }
+    func detach() { lock.lock(); connection = nil; lock.unlock() }
+
+    /// False when there is no control channel or the write failed; the caller then restarts capture.
+    func set(zoom: Double, torch: Bool) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard let connection else { return false }
+        var message = Data()
+        if torch != phoneTorch { message += ScrcpyCameraControl.torch(torch) }
+        let plan = ScrcpyCameraControl.zoomPlan(from: phoneZoom, to: zoom)
+        for _ in 0..<plan.steps { message += plan.zoomIn ? ScrcpyCameraControl.zoomIn : ScrcpyCameraControl.zoomOut }
+        do { if !message.isEmpty { try connection.write(message) } }
+        catch {
+            // The server stops capture when its control channel breaks.
+            self.connection = nil
+            log("Live camera control failed: \(error.localizedDescription)")
+            return false
+        }
+        var changes: [String] = []
+        if plan.steps > 0 { changes.append(String(format: "zoom %.2f×", plan.result)) }
+        if torch != phoneTorch { changes.append(torch ? "torch on" : "torch off") }
+        if !changes.isEmpty { log("Changed on the running capture: \(changes.joined(separator: ", ")).") }
+        self.zoom = zoom; self.torch = torch; phoneZoom = plan.result; phoneTorch = torch
+        return true
+    }
+}
+
 /// Receives a resolved configuration; keep device and server checks here for reconnects.
 final class AndroidCapture: CaptureSource {
-    func run(configuration c: Configuration, cancellation: Cancellation, onFrame: @escaping (CVPixelBuffer) -> Void) throws {
+    private enum Stage { case connected, streaming }
+    private let control: LiveCameraControl?
+    init(control: LiveCameraControl? = nil) { self.control = control }
+
+    func run(configuration original: Configuration, cancellation: Cancellation, onFrame: @escaping (CVPixelBuffer) -> Void) throws {
+        var c = original
+        // Zoom and torch may have changed on the running capture; a reconnect starts from them.
+        if let values = control?.values { c.cameraZoom = values.zoom; c.cameraTorch = values.torch }
+        guard let control, let serial = c.serial, !LiveCameraControl.isDisabled(for: serial) else {
+            return try stream(c, control: nil, cancellation: cancellation, onFrame: onFrame)
+        }
+        var connected = false, streamed = false
+        do {
+            try stream(c, control: control, cancellation: cancellation, onFrame: onFrame) { stage in
+                if stage == .connected { connected = true } else { streamed = true }
+            }
+        } catch {
+            // The phone answered but sent no video with the control channel open. Start once without
+            // it; if that streams, later captures on this phone skip the channel.
+            guard connected, !streamed, !cancellation.isCancelled else { throw error }
+            log("No video with live camera controls (\(error.localizedDescription)); starting without them.")
+            try stream(c, control: nil, cancellation: cancellation, onFrame: onFrame) { stage in
+                if stage == .streaming { LiveCameraControl.disable(for: serial) }
+            }
+        }
+    }
+
+    private func stream(_ c: Configuration, control: LiveCameraControl?, cancellation: Cancellation,
+                        onFrame: @escaping (CVPixelBuffer) -> Void, onStage: (Stage) -> Void = { _ in }) throws {
         let tools = try AndroidTools(c), selected = try ADBDevice.select(tools.devices(cancellation:cancellation),serial:c.serial)
         let prefix = ["-s",selected.serial]
         let server = try AndroidTools.serverPath(c)
@@ -66,7 +157,7 @@ final class AndroidCapture: CaptureSource {
         let portText = try ProcessRunner.run(tools.adb,prefix+["forward","tcp:0","localabstract:\(sessionID.socketName)"],cancellation:cancellation).text
         guard let line = portText.split(whereSeparator:\.isNewline).last, let port = UInt16(line), port > 0 else { throw DroidDozeCamError.message("ADB did not return a valid local port: \(portText)") }
         defer { _ = try? ProcessRunner.run(tools.adb,prefix+["forward","--remove","tcp:\(port)"],timeout:3,allowFailure:true) }
-        let options = try ScrcpyVideoOptions.arguments(c, session: sessionID)
+        let options = try ScrcpyVideoOptions.arguments(c, session: sessionID, control: control != nil)
         let process = Process()
         process.executableURL = URL(fileURLWithPath:tools.adb)
         // Options contain only locally validated values. No user-provided shell program is executed.
@@ -85,8 +176,13 @@ final class AndroidCapture: CaptureSource {
             } catch { cancellation.sleep(0.1) }
         }
         guard let connection = connected else { throw DroidDozeCamError.message("Android camera server did not start. Check USB authorization, camera privacy toggle, Android version, and server logs above.") }
+        onStage(.connected)
+        // The server accepts the control channel straight after the video one, and sends no video
+        // until it has. Closing the channel stops the server, so it stays open for the whole capture.
+        let controlConnection = try control.map { _ in try USBConnection(port:port,cancellation:cancellation) }
+        defer { control?.detach(); withExtendedLifetime(controlConnection) {} }
         _ = try StreamHeader(data: connection.readExact(4))
-        var hasSession = false
+        var hasSession = false, streaming = false
         let decoder = H264Decoder(requireHardware:c.requireHardware,onFrame:onFrame)
         var epoch: Double?, lastPTS: UInt64?, skipping = false
         while !cancellation.isCancelled {
@@ -114,6 +210,11 @@ final class AndroidCapture: CaptureSource {
                 }
             }
             try autoreleasepool { try decoder.consume(header:header,payload:payload) }
+            if !streaming && !header.isConfiguration {
+                streaming = true
+                onStage(.streaming)
+                if let control, let controlConnection { control.attach(controlConnection, zoom: c.cameraZoom, torch: c.cameraTorch) }
+            }
         }
     }
 }

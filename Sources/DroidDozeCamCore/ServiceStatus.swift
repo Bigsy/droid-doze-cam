@@ -6,11 +6,13 @@ public struct ServiceStatus: Codable, Equatable, Sendable {
     public let state: State
     /// The phone in use, or why it is unavailable.
     public let detail: String
+    /// The serial of the phone in use, so Settings and the menu change that phone's camera choices.
+    public let serial: String?
     /// A status left by a process that has exited is stale.
     public let pid: Int32
 
-    public init(state: State, detail: String, pid: Int32 = ProcessInfo.processInfo.processIdentifier) {
-        self.state = state; self.detail = detail; self.pid = pid
+    public init(state: State, detail: String, serial: String? = nil, pid: Int32 = ProcessInfo.processInfo.processIdentifier) {
+        self.state = state; self.detail = detail; self.serial = serial; self.pid = pid
     }
 }
 

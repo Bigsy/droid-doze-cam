@@ -52,4 +52,11 @@ public struct OnDemandPolicy {
         hasSession = true; activeSettings = settings; activeFPS = fps ?? settings.fps
     }
     public mutating func startFailed(now: Double) { nextAttempt = now + Self.retryDelay }
+
+    /// The running session's settings while a change can still be applied to it; nil once it is stopping.
+    public var adjustableSettings: CameraCaptureSettings? { hasSession && stopReason == nil ? activeSettings : nil }
+    /// The running session took `settings` over its control channel, so they need no restart.
+    public mutating func adjusted(to settings: CameraCaptureSettings) {
+        if hasSession && stopReason == nil { activeSettings = settings }
+    }
 }

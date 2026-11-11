@@ -101,7 +101,7 @@ done
 EXTENSION_RUNNING=0
 if pgrep -f '/com[.]hedworth[.]usbwakecam[.]camera[.]systemextension/Contents/MacOS/[^/ ]+( |$)' >/dev/null; then
   EXTENSION_RUNNING=1
-  echo "The current camera extension is still running; its replacement must wait until macOS unloads it." >&2
+  echo "The current camera extension is still running, so an app still has a camera open (often a browser or a call app)." >&2
 fi
 # An approved extension can be replaced without a prompt. Do it before the login service restarts,
 # because serve and the menu bar app keep the old extension running.
@@ -160,10 +160,25 @@ done
 if [[ -n "$BACKUP" ]]; then echo "Replaced the previous app."; fi
 if [[ "$(cat "$ROOT/dist/build-mode.txt")" == --signed ]]; then
   if [[ "$EXTENSION_RUNNING" == 1 ]]; then
-    echo "Installed the app. Keep using the current camera extension; activate the new one after the old process exits or after a restart."
+    echo "Installed the app, but not its camera extension: the current one is still running and keeps working."
+    echo "To replace it, quit apps that use a camera (browsers and call apps too) and run this install again."
+    echo "Do not run droiddozecam install-extension while it is running; Mac apps can lose the camera."
   elif [[ "$EXTENSION_APPROVED" == 1 ]]; then
     EXECUTABLE=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' /Applications/DroidDozeCam.app/Contents/Info.plist)
     "/Applications/DroidDozeCam.app/Contents/MacOS/$EXECUTABLE" install-extension
+    # The login service restarts when this script exits. A service that starts before Mac apps can see
+    # the new camera never finds it, and its own retry runs at most once in ten minutes.
+    CAMERA_VISIBLE=0
+    for attempt in $(seq 1 30); do
+      if "/Applications/DroidDozeCam.app/Contents/MacOS/$EXECUTABLE" status 2>/dev/null | grep -q 'Virtual camera visible: true'; then
+        CAMERA_VISIBLE=1
+        break
+      fi
+      sleep 0.5
+    done
+    if [[ "$CAMERA_VISIBLE" == 0 ]]; then
+      echo "The new camera is not visible to Mac apps yet. If it stays missing, use Restart Service in Settings, Setup." >&2
+    fi
   else
     echo "Installed. Run as your normal user: droiddozecam install-extension"
   fi

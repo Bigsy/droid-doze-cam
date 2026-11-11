@@ -2,12 +2,22 @@ import AppKit
 import DroidDozeCamCore
 
 @MainActor
-final class MenuBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class MenuBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemValidation {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let setup = CameraSetup()
     private lazy var settings = CameraSettingsWindow(setup: setup)
     private let serviceState = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let serviceDetail = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+    private let mirrorItem = NSMenuItem(title: "Mirror", action: #selector(toggleMirror), keyEquivalent: "")
+    private let blurItem = NSMenuItem(title: "Blur Background", action: #selector(toggleBlur), keyEquivalent: "")
+    private let torchItem = NSMenuItem(title: "Torch", action: #selector(toggleTorch), keyEquivalent: "")
+    private let zoomItem = NSMenuItem()
+    private let zoomControl = CameraZoomControl(frame: NSRect(x: 72, y: 3, width: 216, height: 24))
+    private let cameraItem = NSMenuItem(title: "Switch Front/Back Camera", action: #selector(switchCamera), keyEquivalent: "")
+    private let store = CameraSettingsStore()
+    /// The phone whose torch and zoom the menu shows. Finding the plugged-in phone lists USB devices,
+    /// so it is refreshed in the background each time the menu opens.
+    private var menuPhone = CameraSetup.knownPhones.first
     private let statusFile = ServiceStatusFile(directory: supportDirectory)
     private var statusTimer: Timer?
 
@@ -21,6 +31,22 @@ final class MenuBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         serviceDetail.isEnabled = false
         menu.addItem(serviceState)
         menu.addItem(serviceDetail)
+        menu.addItem(.separator())
+        // Zoom is a slider in the menu, so the picture can be watched while it is dragged.
+        let zoomRow = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 30))
+        let zoomLabel = NSTextField(labelWithString: "Zoom")
+        zoomLabel.font = .menuFont(ofSize: 0)
+        zoomLabel.frame = NSRect(x: 21, y: 6, width: 48, height: 18)
+        zoomControl.showReadoutOnly()
+        zoomControl.target = self
+        zoomControl.action = #selector(zoomChanged)
+        zoomRow.addSubview(zoomLabel)
+        zoomRow.addSubview(zoomControl)
+        zoomItem.view = zoomRow
+        for item in [mirrorItem, blurItem, torchItem, zoomItem, cameraItem] {
+            item.target = self
+            menu.addItem(item)
+        }
         menu.addItem(.separator())
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
@@ -45,7 +71,77 @@ final class MenuBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return false
     }
 
-    func menuNeedsUpdate(_ menu: NSMenu) { updateServiceStatus() }
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        updateServiceStatus()
+        let image = store.read()
+        mirrorItem.state = image.mirror ? .on : .off
+        blurItem.state = image.backgroundBlur ? .on : .off
+        showPhoneControls()
+        let status = statusFile.read()
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let phone = CameraSetup.currentPhone(status)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, phone != self.menuPhone else { return }
+                self.menuPhone = phone
+                self.showPhoneControls()
+            }
+        }
+    }
+
+    /// Torch and zoom are saved per phone and camera.
+    private func showPhoneControls() {
+        let saved = store.readCapture(for: menuPhone)
+        torchItem.state = saved.cameraTorch ? .on : .off
+        let range = settings.phoneZoomRange(for: menuPhone, saved: saved)
+        zoomControl.configure(minimum: range.lowerBound, maximum: range.upperBound, selected: saved.cameraZoom)
+        zoomControl.isEnabled = menuPhone != nil
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool { menuItem !== torchItem || menuPhone != nil }
+
+    @objc private func toggleMirror() { writeImage(mirror: !store.read().mirror) }
+    @objc private func toggleBlur() { writeImage(backgroundBlur: !store.read().backgroundBlur) }
+
+    /// The running picture takes these within half a second.
+    private func writeImage(mirror: Bool? = nil, backgroundBlur: Bool? = nil) {
+        let old = store.read()
+        store.write(CameraTransform(rotation: old.rotation, mirror: mirror ?? old.mirror, fit: old.fit, zoom: old.zoom,
+                                    backgroundBlur: backgroundBlur ?? old.backgroundBlur, blurRadius: old.blurRadius))
+        settings.reload()
+    }
+
+    /// A running picture takes torch and zoom without restarting; otherwise they apply when capture starts.
+    @objc private func toggleTorch() { changeCapture { $0.withCameraControls(torch: !$0.cameraTorch) } }
+    @objc private func zoomChanged() {
+        let zoom = zoomControl.zoom
+        changeCapture { $0.withCameraControls(zoom: zoom) }
+    }
+
+    /// Switching restarts capture. Source size, zoom and torch belong to a camera, so they are not carried over.
+    @objc private func switchCamera() {
+        changeCapture {
+            CameraCaptureSettings(size: $0.size, fps: $0.fps, bitrate: $0.bitrate,
+                                  facing: $0.facing == "front" ? "back" : "front", videoEncoder: $0.videoEncoder)
+        }
+    }
+
+    /// Camera choices are saved per phone, and finding the plugged-in phone lists USB devices.
+    private func changeCapture(_ change: @escaping @Sendable (CameraCaptureSettings) -> CameraCaptureSettings) {
+        let status = statusFile.read()
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let phone = CameraSetup.currentPhone(status)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.menuPhone = phone
+                let changed = change(self.store.readCapture(for: phone))
+                // Zoom, torch and a camera by ID are kept per phone, so they need one.
+                guard changed.isSupported, phone != nil || changed.cameraID == nil else { return }
+                self.store.writeCapture(changed, for: phone)
+                self.settings.reload()
+                self.showPhoneControls()
+            }
+        }
+    }
 
     @objc private func updateServiceStatus() {
         let (title, detail, symbol) = describe(statusFile.read())
@@ -80,7 +176,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate {
 }
 
 @MainActor
-private final class CameraSettingsWindow: NSObject {
+private final class CameraSettingsWindow: NSObject, NSWindowDelegate {
     private struct CameraChoice {
         let title: String
         let facing: String
@@ -88,9 +184,12 @@ private final class CameraSettingsWindow: NSObject {
     }
     private let store = CameraSettingsStore()
     private let setup: CameraSetup
-    private let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 580, height: 520),
+    private let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 580, height: 548),
                                   styleMask: [.titled, .closable], backing: .buffered, defer: false)
     private let tabs = NSTabView(frame: .zero)
+    private let showPreview = NSButton(checkboxWithTitle: "Show preview", target: nil, action: nil)
+    private let preview = SettingsPreview(frame: .zero)
+    private let previewHeight: NSLayoutConstraint
     private let readiness = NSStackView()
     private let setupHeading = NSTextField(labelWithString: "Checking setup…")
     private let setupGuidance = NSTextField(wrappingLabelWithString: "")
@@ -126,9 +225,11 @@ private final class CameraSettingsWindow: NSObject {
 
     init(setup: CameraSetup) {
         self.setup = setup
+        previewHeight = preview.heightAnchor.constraint(equalToConstant: 0)
         super.init()
         window.title = "DroidDozeCam Settings"
         window.isReleasedWhenClosed = false
+        window.delegate = self
         window.center()
         setup.onStatusChanged = { [weak self] in self?.refreshReadiness() }
 
@@ -195,12 +296,12 @@ private final class CameraSettingsWindow: NSObject {
         appearanceRows.spacing = 9
 
         let captureNote = NSTextField(wrappingLabelWithString:
-            "Saves automatically. Capture restarts briefly; zoom applies on release.")
+            "Saves automatically. Zoom and torch change on the running picture, zoom when released; other changes restart capture briefly.")
         captureNote.textColor = .secondaryLabelColor
         frameRate.toolTip = "Maximum capture rate. Calls using 30 fps or less request 30 fps from the phone. 120 fps requires a supported high-speed mode; 4K supports up to 60 fps. Reported modes are not guaranteed."
         cameraSize.toolTip = "Resolution captured on the phone before scaling to the output size. Leave Automatic selected unless you need a specific mode."
         encoder.toolTip = "Leave Automatic selected unless you need to try another H.264 encoder."
-        cameraZoom.toolTip = "Zoom on the phone before encoding. Lens switching depends on the phone. Release to apply."
+        cameraZoom.toolTip = "Zoom on the phone before encoding. Lens switching depends on the phone. Release to apply. A running picture zooms in steps of about 6%, so it can be slightly off until capture next starts."
         torch.toolTip = "Turns on the light if the selected phone camera supports it."
         addTab("Capture", views: [captureTitle, captureRows, capabilities, captureNote])
 
@@ -232,15 +333,55 @@ private final class CameraSettingsWindow: NSObject {
         addTab("Setup", views: [setupHeading, setupGuidance, readiness, setupButtons, divider,
                                heading("ADB on this Mac"), adbButtons, heading("Maintenance"), maintenance])
 
-        tabs.translatesAutoresizingMaskIntoConstraints = false
-        window.contentView?.addSubview(tabs)
+        showPreview.target = self
+        showPreview.action = #selector(togglePreview)
+        showPreview.toolTip = "Shows the picture Mac apps receive. The phone camera runs while this is ticked."
+        preview.isHidden = true
+        let content = window.contentView!
+        for view: NSView in [showPreview, preview, tabs] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            content.addSubview(view)
+        }
         NSLayoutConstraint.activate([
-            tabs.leadingAnchor.constraint(equalTo: window.contentView!.leadingAnchor, constant: 12),
-            tabs.trailingAnchor.constraint(equalTo: window.contentView!.trailingAnchor, constant: -12),
-            tabs.topAnchor.constraint(equalTo: window.contentView!.topAnchor, constant: 12),
-            tabs.bottomAnchor.constraint(equalTo: window.contentView!.bottomAnchor, constant: -12)
+            showPreview.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 14),
+            showPreview.topAnchor.constraint(equalTo: content.topAnchor, constant: 10),
+            preview.topAnchor.constraint(equalTo: showPreview.bottomAnchor, constant: 6),
+            preview.centerXAnchor.constraint(equalTo: content.centerXAnchor),
+            preview.widthAnchor.constraint(equalTo: preview.heightAnchor, multiplier: 16.0 / 9.0),
+            previewHeight,
+            tabs.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
+            tabs.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
+            tabs.topAnchor.constraint(equalTo: preview.bottomAnchor, constant: 6),
+            tabs.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -12)
         ])
     }
+
+    @objc private func togglePreview() { setPreview(showPreview.state == .on) }
+
+    /// The window grows by the height of the picture and keeps its title bar where it is. The picture
+    /// is as wide as the tabs when the screen has room, and smaller on a short screen.
+    private func setPreview(_ shown: Bool) {
+        let old = previewHeight.constant
+        var height: CGFloat = 0
+        if shown {
+            let room = window.screen?.visibleFrame.height ?? .greatestFiniteMagnitude
+            height = max(160, min(312, room - (window.frame.height - old)))
+        }
+        showPreview.state = shown ? .on : .off
+        preview.isHidden = !shown
+        previewHeight.constant = height
+        var frame = window.frame
+        frame.size.height += height - old
+        frame.origin.y -= height - old
+        if let visible = window.screen?.visibleFrame {
+            frame.origin.y = max(frame.origin.y, min(visible.minY, visible.maxY - frame.height))
+        }
+        window.setFrame(frame, display: true)
+        if shown { preview.start() } else { preview.stop() }
+    }
+
+    /// The phone camera must not keep running behind a closed window, and Settings opens without it.
+    func windowWillClose(_ notification: Notification) { setPreview(false) }
 
     private func addTab(_ title: String, views: [NSView]) {
         let item = NSTabViewItem(identifier: title)
@@ -282,8 +423,37 @@ private final class CameraSettingsWindow: NSObject {
     }
 
     func show(setupTab: Bool = false) {
-        // The service only reads choices saved for its phone, including while that phone is unplugged.
-        let serial = CameraSetup.serviceSerial
+        loadControls()
+        refreshReadiness()
+        if setupTab { tabs.selectTabViewItem(withIdentifier: "Setup") }
+        window.makeKeyAndOrderFront(nil)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        loadCameraCapabilities()
+    }
+
+    /// Shows a change made from the menu bar.
+    func reload() { loadControls() }
+
+    /// The phone zoom range for the camera saved for `serial`: the phone's own once its cameras have
+    /// been read, else wide enough for the saved ratio.
+    func phoneZoomRange(for serial: String?, saved: CameraCaptureSettings) -> ClosedRange<Double> {
+        let cameras = serial != nil && serial == activeSerial ? availableCameras : []
+        let info = cameras.first { camera in saved.cameraID.map { camera.id == $0 } ?? (camera.facing == saved.facing) }
+        return Self.zoomRange(info, saved: saved.cameraZoom)
+    }
+
+    private static func zoomRange(_ info: AndroidCameraInfo?, saved: Double) -> ClosedRange<Double> {
+        let lower = min(100, max(0.1, info?.minimumZoom ?? min(1, saved)))
+        let upper = max(lower, min(100, info?.maximumZoom ?? max(4, saved)))
+        return lower...upper
+    }
+
+    private func loadControls() {
+        // The service reads the choices saved for the phone it uses, including while that phone is unplugged.
+        // Show the phone in use, else stay on the plugged-in phone found earlier, else the preferred phone.
+        let known = CameraSetup.knownPhones
+        let serial = CameraSetup.phoneInUse(ServiceStatusFile(directory: supportDirectory).read())
+            ?? activeSerial.flatMap { known.contains($0) ? $0 : nil } ?? known.first
         if let serial, serial != activeSerial { activeSerial = serial; availableCameras = []; availableEncoders = [] }
         let savedCapture = store.readCapture(for: activeSerial)
         refreshCameraChoices(cameras: availableCameras, saved: savedCapture)
@@ -303,21 +473,22 @@ private final class CameraSettingsWindow: NSObject {
         backgroundBlur.state = appearance.backgroundBlur ? .on : .off
         blurStrength.integerValue = appearance.blurRadius
         blurStrength.isEnabled = appearance.backgroundBlur
-        refreshReadiness()
-        if setupTab { tabs.selectTabViewItem(withIdentifier: "Setup") }
-        window.makeKeyAndOrderFront(nil)
-        NSApplication.shared.activate(ignoringOtherApps: true)
-        loadCameraCapabilities(serial: serial)
     }
 
-    /// Asking the phone for its cameras takes seconds, so it runs off the main thread.
-    private func loadCameraCapabilities(serial: String?) {
+    /// Asking the phone for its cameras takes seconds, so it runs off the main thread. The phone is the
+    /// one the service is using, else the set-up phone that is plugged in.
+    private func loadCameraCapabilities() {
         cameraLoad &+= 1
         let load = cameraLoad
         capabilities.isHidden = false
         capabilities.stringValue = "Reading phone capabilities…"
+        let inUse = CameraSetup.phoneInUse(ServiceStatusFile(directory: supportDirectory).read())
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            let result = Result { try AndroidTools(Configuration()).cameras(serial: serial) }
+            let result = Result {
+                let tools = try AndroidTools(Configuration())
+                let serial = try inUse ?? ADBDevice.select(tools.devices(), known: CameraSetup.knownPhones).serial
+                return try tools.cameras(serial: serial)
+            }
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.cameraLoad == load else { return }
                 switch result {
@@ -449,9 +620,8 @@ private final class CameraSettingsWindow: NSObject {
             if let item = encoder.itemArray.first(where: { $0.representedObject as? String == name }) { encoder.select(item) }
             else { encoder.addItem(withTitle: name + " (saved)"); encoder.lastItem?.representedObject = name; encoder.select(encoder.lastItem) }
         }
-        let lower = min(100, max(0.1, info?.minimumZoom ?? min(1, saved.cameraZoom)))
-        let upper = max(lower, min(100, info?.maximumZoom ?? max(4, saved.cameraZoom)))
-        cameraZoom.configure(minimum: lower, maximum: upper, selected: saved.cameraZoom)
+        let range = Self.zoomRange(info, saved: saved.cameraZoom)
+        cameraZoom.configure(minimum: range.lowerBound, maximum: range.upperBound, selected: saved.cameraZoom)
         torch.state = saved.cameraTorch ? .on : .off
         for control: NSControl in [cameraSize, encoder, cameraZoom, torch] { control.isEnabled = activeSerial != nil }
         capabilities.isHidden = info != nil

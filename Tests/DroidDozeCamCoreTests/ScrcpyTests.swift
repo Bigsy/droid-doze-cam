@@ -184,3 +184,49 @@ final class ScrcpyServerOptionsTests: XCTestCase {
         }
     }
 }
+
+final class ScrcpyCameraControlTests: XCTestCase {
+    func testMessagesMatchTheServerProtocol() {
+        XCTAssertEqual(ScrcpyCameraControl.torch(true), Data([18, 1]))
+        XCTAssertEqual(ScrcpyCameraControl.torch(false), Data([18, 0]))
+        XCTAssertEqual(ScrcpyCameraControl.zoomIn, Data([19]))
+        XCTAssertEqual(ScrcpyCameraControl.zoomOut, Data([20]))
+    }
+
+    func testTheControlChannelIsOffUnlessAskedForAndNeverWakesThePhone() throws {
+        let c = try Configuration.parse(["preview"])
+        XCTAssertTrue(try ScrcpyVideoOptions.arguments(c, session: ScrcpySessionID(1)).contains("control=false"))
+        let live = try ScrcpyVideoOptions.arguments(c, session: ScrcpySessionID(1), control: true)
+        for value in ["control=true", "power_on=false", "clipboard_autosync=false", "audio=false"] {
+            XCTAssertTrue(live.contains(value), value)
+        }
+    }
+
+    // Expected ratios come from the server's formula in CameraCapture.zoom, worked out separately in float.
+    func testOneStepAlignsToAPowerOfTheFactorFirst() {
+        XCTAssertEqual(ScrcpyCameraControl.stepped(1, zoomIn: true), 1.0625)
+        XCTAssertEqual(ScrcpyCameraControl.stepped(1, zoomIn: false), 0.94117647, accuracy: 1e-6)
+        XCTAssertEqual(ScrcpyCameraControl.stepped(2, zoomIn: true), 2.06989, accuracy: 1e-5)
+        XCTAssertEqual(ScrcpyCameraControl.stepped(2, zoomIn: false), 1.8335358, accuracy: 1e-5)
+    }
+
+    func testThePlanEndsNearestToTheTarget() {
+        func check(_ current: Float, _ target: Double, _ zoomIn: Bool, _ steps: Int, _ result: Float, line: UInt = #line) {
+            let plan = ScrcpyCameraControl.zoomPlan(from: current, to: target)
+            XCTAssertEqual(plan.steps, steps, line: line)
+            if steps > 0 { XCTAssertEqual(plan.zoomIn, zoomIn, line: line) }
+            XCTAssertEqual(plan.result, result, accuracy: 1e-4, line: line)
+        }
+        check(1, 2, true, 11, 1.9481318)
+        check(2, 1, false, 11, 1)
+        check(1, 1, false, 0, 1)
+        // The nearest step from an exact 2 is further from 1.95 than staying put.
+        check(2, 1.95, false, 0, 2)
+        check(1, 1.1, true, 2, 1.1289063)
+        check(1.3, 5, true, 23, 5.1390324)
+        check(8, 0.6, false, 42, 0.6156991)
+        check(0.5, 1, true, 11, 1)
+        check(0, 2, false, 0, 0)
+        check(1, .nan, false, 0, 1)
+    }
+}

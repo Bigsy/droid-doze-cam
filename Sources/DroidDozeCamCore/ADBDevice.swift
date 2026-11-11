@@ -30,4 +30,20 @@ public struct ADBDevice: Equatable, Codable {
         }
         return usb[0]
     }
+    /// The phone the login service uses: the first of `known`, in order, that is connected and authorized.
+    /// A phone that was never set up is refused. With no known phones it is the only authorized USB phone.
+    public static func select(_ devices: [ADBDevice], known: [String]) throws -> ADBDevice {
+        guard !known.isEmpty else { return try select(devices, serial: nil) }
+        let usable = devices.filter { $0.isUSB && $0.state == "device" }
+        for serial in known {
+            if let device = usable.first(where: { $0.serial == serial }) { return device }
+        }
+        if let waiting = devices.first(where: { known.contains($0.serial) && $0.isUSB }) {
+            throw DroidDozeCamError.message("Android '\(waiting.serial)' is \(waiting.state). Unlock the phone and authorize USB debugging.")
+        }
+        if let other = usable.first {
+            throw DroidDozeCamError.message("\(other.model ?? "This phone") has not been set up. Open Settings, then Setup, and choose Set Up Camera to use it.")
+        }
+        throw DroidDozeCamError.message("No set-up phone is connected. Use a USB data cable and check that USB debugging is on.")
+    }
 }

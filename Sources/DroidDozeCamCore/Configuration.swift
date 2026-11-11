@@ -94,6 +94,16 @@ public struct CameraCaptureSettings: Equatable, Sendable {
         return CameraCaptureSettings(size: size, fps: 30, bitrate: bitrate, facing: facing, cameraID: cameraID,
             cameraSize: cameraSize, cameraZoom: cameraZoom, cameraTorch: cameraTorch, videoEncoder: videoEncoder)
     }
+    /// The same capture with another phone zoom or torch.
+    public func withCameraControls(zoom: Double? = nil, torch: Bool? = nil) -> CameraCaptureSettings {
+        CameraCaptureSettings(size: size, fps: fps, bitrate: bitrate, facing: facing, cameraID: cameraID, cameraSize: cameraSize,
+            cameraZoom: zoom ?? cameraZoom, cameraTorch: torch ?? cameraTorch, videoEncoder: videoEncoder)
+    }
+    /// The same capture apart from phone zoom and torch, which a running capture can change without restarting.
+    public func sameExceptCameraControls(as other: CameraCaptureSettings) -> Bool {
+        size == other.size && fps == other.fps && bitrate == other.bitrate && facing == other.facing &&
+        cameraID == other.cameraID && cameraSize == other.cameraSize && videoEncoder == other.videoEncoder
+    }
     public static func validEncoder(_ value: String) -> Bool {
         !value.isEmpty && value.count <= 256 && value.utf8.allSatisfy {
             (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || [45, 46, 95].contains($0)
@@ -128,8 +138,26 @@ public final class CameraSettingsStore {
     private let bitrateKey = "camera.captureBitrate"
     private let facingKey = "camera.facing"
     private let cameraSelectionsKey = "camera.selectionsBySerial"
+    private let knownPhonesKey = "setup.knownPhones"
 
     public init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+
+    /// Phones chosen in Set Up Camera, the latest first. The login service captures only from these,
+    /// because capture gives no sign on a locked, dark phone.
+    public func knownPhones() -> [String] {
+        defaults.synchronize()
+        return defaults.stringArray(forKey: knownPhonesKey) ?? []
+    }
+
+    public func rememberPhone(_ serial: String) {
+        defaults.set([serial] + knownPhones().filter { $0 != serial }, forKey: knownPhonesKey)
+        defaults.synchronize()
+    }
+
+    public func forgetPhones() {
+        defaults.removeObject(forKey: knownPhonesKey)
+        defaults.synchronize()
+    }
 
     public func read() -> CameraTransform {
         defaults.synchronize() // See changes written by the separate login service or menu process.
@@ -228,6 +256,7 @@ public struct Configuration: Equatable, Sendable {
     public var fitIsExplicit = false
     public var reconnect = true
     public var json = false
+    public var force = false
     public var duration: Double?
     public var adbPath: String?
     public var serverPath: String?
@@ -284,7 +313,7 @@ public struct Configuration: Equatable, Sendable {
             let key = String(split[0])
             guard !supplied.contains(key) else { throw DroidDozeCamError.message("Duplicate option \(key).") }
             supplied.insert(key)
-            let flags = ["--mirror", "--no-mirror", "--no-reconnect", "--json", "--require-hardware", "--syphon", "--camera-torch", "--no-camera-torch"]
+            let flags = ["--mirror", "--no-mirror", "--no-reconnect", "--json", "--require-hardware", "--syphon", "--camera-torch", "--no-camera-torch", "--force"]
             var value = ""
             if flags.contains(key) {
                 guard split.count == 1 else { throw DroidDozeCamError.message("\(key) does not take a value.") }
@@ -339,6 +368,7 @@ public struct Configuration: Equatable, Sendable {
             case "--no-mirror": c.mirror = false; c.mirrorIsExplicit = true
             case "--no-reconnect": c.reconnect = false
             case "--json": c.json = true
+            case "--force": c.force = true
             case "--duration":
                 guard let n = Double(value), n.isFinite, n > 0, n <= 86400 else { throw DroidDozeCamError.message("Duration must be 0…86400 seconds (exclusive of zero).") }; c.duration = n
             case "--adb": c.adbPath = value
@@ -376,6 +406,7 @@ public struct Configuration: Equatable, Sendable {
         }
         if c.syphonFrameworkPath != nil && !c.syphon { throw DroidDozeCamError.message("--syphon-framework requires --syphon.") }
         if c.demandDirectory != nil && c.command != "serve" { throw DroidDozeCamError.message("--demand-dir requires serve.") }
+        if c.force && c.command != "install-extension" { throw DroidDozeCamError.message("--force requires install-extension.") }
         if c.command == "serve" {
             guard !["--device", "--syphon", "--syphon-framework", "--duration", "--json"].contains(where: supplied.contains) else {
                 throw DroidDozeCamError.message("serve accepts Android USB or test-pattern capture options only.")

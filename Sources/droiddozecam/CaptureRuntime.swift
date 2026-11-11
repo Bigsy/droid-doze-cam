@@ -50,8 +50,10 @@ enum CaptureRuntime {
     static func resolve(_ original: Configuration, cancellation: Cancellation) throws -> Configuration {
         try resolvePhone(original, cancellation: cancellation).configuration
     }
-    /// Also returns the Android phone that was selected; nil for other sources.
-    static func resolvePhone(_ original: Configuration, cancellation: Cancellation) throws -> (configuration: Configuration, phone: ADBDevice?) {
+    /// Also returns the Android phone that was selected; nil for other sources. `preselected` is a phone
+    /// the caller has already chosen from the current device list.
+    static func resolvePhone(_ original: Configuration, cancellation: Cancellation,
+                             preselected: ADBDevice? = nil) throws -> (configuration: Configuration, phone: ADBDevice?) {
         var c = original
         var phone: ADBDevice?
         if c.source == .test { return (c, nil) }
@@ -63,7 +65,7 @@ enum CaptureRuntime {
         }
         if c.source == .android {
             let tools = try AndroidTools(c)
-            let selected = try ADBDevice.select(tools.devices(cancellation: cancellation), serial: c.serial)
+            let selected = try preselected ?? ADBDevice.select(tools.devices(cancellation: cancellation), serial: c.serial)
             c.serial = selected.serial
             phone = selected
             c.serverPath = try AndroidTools.serverPath(c)
@@ -84,8 +86,10 @@ enum CaptureRuntime {
     }
     /// Runs a configuration already checked by resolve, preserving the selected phone on reconnect.
     /// `statsInterval` is the time between progress lines; the login service spaces them out to keep its log readable.
+    /// `liveControl` lets the caller change phone zoom and torch while an Android capture runs.
     static func run(resolved c: Configuration, cancellation: Cancellation, onProcessedFrame: ((CVPixelBuffer) -> Void)? = nil,
-                    onEvent: ((CaptureEvent) -> Void)? = nil, statsInterval: Double = 2) throws -> RuntimeReport {
+                    onEvent: ((CaptureEvent) -> Void)? = nil, statsInterval: Double = 2,
+                    liveControl: LiveCameraControl? = nil) throws -> RuntimeReport {
         let instance = c.command == "run" ? try InstanceLock() : nil
         defer { withExtendedLifetime(instance) {} }
         let renderer = try FrameRenderer(size: c.size)
@@ -195,7 +199,7 @@ enum CaptureRuntime {
             do {
                 let source: CaptureSource
                 switch c.source {
-                case .android: source = AndroidCapture()
+                case .android: source = AndroidCapture(control: liveControl)
                 case .test: source = TestCapture()
                 default: source = NativeCapture()
                 }

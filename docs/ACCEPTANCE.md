@@ -26,7 +26,7 @@ This procedure checks local output through OBS. Signing of DroidDozeCam's own ex
 | iPhone | Connect over USB, trust the Mac, meet the Continuity Camera requirements; `--source continuity` | The phone picture is visible; record that macOS manages the routing, and do not take a successful run as proof of USB-only transport |
 | Android UVC | Switch the phone to USB Webcam; `--source uvc` | The system sees the native UVC camera; bridged as DroidDozeCam, another client can read it |
 | Android ADB | Android 12+, USB debugging authorized, server checksum passes | The log shows the encoded size and hardware decoding; the target app shows the phone picture |
-| Several phones | Connect two matching devices | The program asks for an explicit ID or serial and never picks at random |
+| Several phones | Connect two matching devices | The CLI asks for an explicit ID or serial and never picks at random. The login service uses the phone set up last in Set Up Camera, and never a phone that was not set up |
 | No wireless ADB | Try `--source android` with a wireless serial | Rejected even when the wireless device is authorized; a TCP device is never treated as USB |
 | Several consumers | Two real camera clients open at the same time | No duplicate source timers; closing one does not affect the other |
 | Transforms | 0/90/180/270, mirror, fit/fill | No stretching; bars or cropping match the option; text mirroring and rotation direction are correct |

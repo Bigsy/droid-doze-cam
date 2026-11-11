@@ -41,6 +41,22 @@ final class USBConnection {
         }
         throw DroidDozeCamError.message("Capture cancelled.")
     }
+    /// For the few bytes of a control message; video only ever flows towards the Mac.
+    func write(_ data: Data, timeout: Double = 2) throws {
+        let deadline = ProcessInfo.processInfo.systemUptime + timeout
+        try data.withUnsafeBytes { raw in
+            var offset = 0
+            while offset < raw.count {
+                try wait(event:Int16(POLLOUT),deadline:deadline)
+                let n = send(fd,raw.baseAddress!.advanced(by:offset),raw.count-offset,0)
+                if n < 0 {
+                    if errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR { continue }
+                    throw DroidDozeCamError.message("USB write failed: \(String(cString:strerror(errno)))")
+                }
+                offset += n
+            }
+        }
+    }
     func readExact(_ count: Int, timeout: Double = 10) throws -> Data {
         guard count > 0, count <= Constants.maxPacketBytes else { throw DroidDozeCamError.message("Invalid socket read size.") }
         var data = Data(count:count)

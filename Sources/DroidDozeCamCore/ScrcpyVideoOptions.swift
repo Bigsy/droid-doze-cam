@@ -2,10 +2,12 @@ import Foundation
 
 /// Arguments passed directly to the pinned server, not scrcpy's desktop CLI.
 public enum ScrcpyVideoOptions {
-    public static func arguments(_ c: Configuration, session: ScrcpySessionID) throws -> [String] {
+    /// `control` opens the channel for live zoom and torch. With a camera source the server ignores input,
+    /// clipboard and power on that channel, so it does not wake the phone.
+    public static func arguments(_ c: Configuration, session: ScrcpySessionID, control: Bool = false) throws -> [String] {
         guard c.captureSettings.isSupported else { throw DroidDozeCamError.message("Invalid Android capture settings.") }
         var result = [
-            "scid=\(session.hex)", "log_level=warn", "video=true", "audio=false", "control=false",
+            "scid=\(session.hex)", "log_level=warn", "video=true", "audio=false", "control=\(control)",
             "video_source=camera", "video_codec=h264", "tunnel_forward=true",
             "send_dummy_byte=true", "send_device_meta=false", "send_stream_meta=true", "send_frame_meta=true",
             "video_bit_rate=\(c.bitrate)", "camera_fps=\(c.fps)", "cleanup=true",

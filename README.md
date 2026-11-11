@@ -37,7 +37,7 @@ Menu names vary by manufacturer. See Google's [Developer options instructions](h
 4. Approve the camera extension when macOS asks.
 5. In your video app, select **DroidDozeCam** as the camera.
 
-The login service starts USB capture only while an app uses the camera and stops it when the last stream closes. The menu bar icon shows whether the service is ready, starting, streaming, reconnecting, or needs attention. Closing the menu bar app does not stop the service.
+The login service starts USB capture only while an app uses the camera and stops it when the last stream closes. The menu bar icon shows whether the service is ready, starting, streaming, reconnecting, or needs attention. Its menu also turns mirroring, background blur and the torch on and off, sets the phone zoom with a slider and switches between the front and back camera, without opening Settings. Closing the menu bar app does not stop the service.
 
 Use **Settings → Capture** to choose the phone camera, output size, frame rate and bitrate. With a phone connected, it also reads the available source sizes, frame rates, zoom range and H.264 encoders.
 
@@ -46,9 +46,11 @@ Use **Settings → Capture** to choose the phone camera, output size, frame rate
 - **Camera torch:** enables the camera light when the selected camera supports it.
 - **H.264 encoder:** leave Automatic selected unless you need to try another encoder listed by the phone.
 
-Camera selection, source size, phone zoom, torch and encoder are saved per phone. Changing these settings restarts capture; the zoom slider applies when released. Changing cameras resets source size, zoom and torch for that selection. Reported modes are hints, not guarantees; unlisted frame rates remain available to try.
+Camera selection, source size, phone zoom, torch and encoder are saved per phone. Zoom and torch change on the running picture, zoom when the slider is released; the other settings restart capture briefly. A running picture zooms in steps of about 6%, so it can be up to about 3% off the chosen ratio until capture next starts. Changing cameras resets source size, zoom and torch for that selection. Reported modes are hints, not guarantees; unlisted frame rates remain available to try.
 
 **Settings → Image** provides live rotation, mirroring, fit/fill, **Mac crop** and background blur with a strength slider. Mac crop enlarges the received image independently of phone-side zoom.
+
+Tick **Show preview** at the top of Settings to see the picture Mac apps receive while you change these settings. The phone camera runs while it is ticked and stops when you untick it or close Settings; macOS asks once for camera access. The preview shows what other people see, while many call apps mirror your own view.
 
 The service defaults to 1080p with a maximum of 60 fps. It requests 30 fps when the receiving app uses 30 fps or less. Higher resolutions and frame rates depend on the phone, USB connection and receiving app; requested rates are not guaranteed.
 
@@ -58,7 +60,7 @@ The service defaults to 1080p with a maximum of 60 fps. It requests 30 fps when 
 - **Phone unauthorized:** unlock it and accept the USB debugging prompt. If authorization expires or is revoked, approve the Mac again.
 - **No picture:** check that Android camera access is enabled and close other apps using the phone camera. Try Automatic source size and encoder, 30 fps, 1× camera zoom and torch off. In **Settings → Setup**, try **Restart Camera Service**.
 - **Camera missing in Mac apps:** check the Setup checklist and approve the camera extension. An unsigned development build cannot activate it.
-- **A different phone:** connect it and run **Set Up Camera…** again to select it for the service.
+- **Another phone:** connect it and run **Set Up Camera…** again. The service then uses whichever of the phones you have set up is plugged in, each with its own camera choices. With several plugged in it uses the one set up last. A phone you have not set up is never used, and a device with no usable camera cannot be set up. A call that is running stays on its phone.
 
 To remove the camera and login service, choose **Settings → Setup → Remove Camera Setup…**. Once macOS has deactivated the extension (restart if requested), remove the app from `/Applications`.
 

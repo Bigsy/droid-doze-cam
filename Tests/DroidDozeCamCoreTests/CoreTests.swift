@@ -120,6 +120,19 @@ final class CameraSettingsStoreTests: XCTestCase {
         firstDefaults.set(45, forKey: "camera.rotation")
         XCTAssertEqual(second.read().rotation, 0)
     }
+    func testKnownPhonesKeepTheLatestFirstWithoutDuplicates() {
+        let suite = "DroidDozeCamTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = CameraSettingsStore(defaults: defaults)
+        XCTAssertEqual(store.knownPhones(), [])
+        store.rememberPhone("PHONE_A")
+        store.rememberPhone("PHONE_B")
+        store.rememberPhone("PHONE_A")
+        XCTAssertEqual(CameraSettingsStore(defaults: UserDefaults(suiteName: suite)!).knownPhones(), ["PHONE_A", "PHONE_B"])
+        store.forgetPhones()
+        XCTAssertEqual(store.knownPhones(), [])
+    }
 }
 
 final class CameraDemandTests: XCTestCase {
@@ -182,6 +195,25 @@ final class ADBTests: XCTestCase {
     func testAuthorization() { XCTAssertThrowsError(try ADBDevice.select(ADBDevice.parse(text),serial:"USB999")) }
     func testAmbiguous() { XCTAssertThrowsError(try ADBDevice.select(ADBDevice.parse(text + "\nOTHER device usb:3-4 model:P"),serial:nil)) }
     func testEmpty() { XCTAssertThrowsError(try ADBDevice.select([],serial:nil)) }
+    func testKnownPhonesAreFollowedInOrder() throws {
+        let both = ADBDevice.parse(text + "\nOTHER device usb:3-4 model:Galaxy")
+        XCTAssertEqual(try ADBDevice.select(both, known: ["OTHER", "USB123"]).serial, "OTHER")
+        XCTAssertEqual(try ADBDevice.select(both, known: ["USB123", "OTHER"]).serial, "USB123")
+        XCTAssertEqual(try ADBDevice.select(ADBDevice.parse(text), known: ["OTHER", "USB123"]).serial, "USB123")
+    }
+    func testAPhoneThatWasNeverSetUpIsRefused() {
+        XCTAssertThrowsError(try ADBDevice.select(ADBDevice.parse(text), known: ["OTHER"])) {
+            XCTAssertTrue($0.localizedDescription.contains("has not been set up"), $0.localizedDescription)
+        }
+        XCTAssertThrowsError(try ADBDevice.select(ADBDevice.parse(text), known: ["USB999"])) {
+            XCTAssertTrue($0.localizedDescription.contains("unauthorized"), $0.localizedDescription)
+        }
+        XCTAssertThrowsError(try ADBDevice.select(ADBDevice.parse(text), known: ["192.168.1.2:5555"]))
+        XCTAssertThrowsError(try ADBDevice.select([], known: ["USB123"]))
+    }
+    func testWithoutKnownPhonesTheOnlyAuthorizedPhoneIsUsed() throws {
+        XCTAssertEqual(try ADBDevice.select(ADBDevice.parse(text), known: []).serial, "USB123")
+    }
 }
 
 final class SessionIDTests: XCTestCase {
@@ -268,6 +300,42 @@ final class OnDemandPolicyTests: XCTestCase {
         XCTAssertEqual(policy.update(now: 0.8, wanted: true, desired: fullHD, requestedFPS: 60, sessionFinished: true), [.start])
         policy.started(fullHD, fps: 60)
         XCTAssertEqual(policy.update(now: 1, wanted: true, desired: fullHD, requestedFPS: 30, sessionFinished: false), [])
+    }
+    func testZoomAndTorchTakenByTheRunningSessionNeedNoRestart() {
+        let zoomed = CameraCaptureSettings(size: .hd, fps: 30, bitrate: 8_000_000, facing: "back", cameraZoom: 2, cameraTorch: true)
+        XCTAssertTrue(hd.sameExceptCameraControls(as: zoomed))
+        XCTAssertFalse(hd.sameExceptCameraControls(as: fullHD))
+        XCTAssertFalse(hd.sameExceptCameraControls(as: CameraCaptureSettings(size: .hd, fps: 30, bitrate: 8_000_000, facing: "front", cameraZoom: 2)))
+        var policy = running(hd)
+        XCTAssertEqual(policy.adjustableSettings, hd)
+        policy.adjusted(to: zoomed)
+        XCTAssertEqual(policy.update(now: 1, wanted: true, desired: zoomed, sessionFinished: false), [])
+        // Without a control channel the same change restarts capture, and a stopping session takes no more changes.
+        var restarting = running(hd)
+        XCTAssertEqual(restarting.update(now: 1, wanted: true, desired: zoomed, sessionFinished: false),
+                       [.stop("Capture settings changed; restarting the USB stream.")])
+        XCTAssertNil(restarting.adjustableSettings)
+        restarting.adjusted(to: zoomed)
+        XCTAssertEqual(restarting.update(now: 1.2, wanted: true, desired: zoomed, sessionFinished: true), [.start])
+        XCTAssertNil(OnDemandPolicy().adjustableSettings)
+    }
+    func testChangingZoomOrTorchKeepsTheRestOfTheCapture() {
+        let saved = CameraCaptureSettings(size: .qhd, fps: 60, bitrate: 40_000_000, facing: "back", cameraID: "2",
+                                          cameraSize: .fullHD, cameraZoom: 1.4, cameraTorch: false, videoEncoder: "c2.qti.avc.encoder")
+        let zoomed = saved.withCameraControls(zoom: 3)
+        XCTAssertEqual(zoomed.cameraZoom, 3)
+        XCTAssertFalse(zoomed.cameraTorch)
+        XCTAssertTrue(saved.sameExceptCameraControls(as: zoomed))
+        let lit = zoomed.withCameraControls(torch: true)
+        XCTAssertTrue(lit.cameraTorch)
+        XCTAssertEqual(lit.cameraZoom, 3)
+        XCTAssertEqual(lit.withCameraControls(zoom: 1.4, torch: false), saved)
+    }
+    func testForceBelongsToInstallExtension() throws {
+        XCTAssertTrue(try Configuration.parse(["install-extension", "--force"]).force)
+        XCTAssertFalse(try Configuration.parse(["install-extension"]).force)
+        XCTAssertThrowsError(try Configuration.parse(["serve", "--force"]))
+        XCTAssertThrowsError(try Configuration.parse(["install-extension", "--force=yes"]))
     }
 }
 
@@ -365,6 +433,13 @@ final class ServiceStatusTests: XCTestCase {
         XCTAssertNil(file.read())
         try Data("not json".utf8).write(to: file.url)
         XCTAssertNil(file.read())
+    }
+    func testThePhoneInUseIsOptionalSoAnOlderStatusStillReads() throws {
+        let older = try JSONDecoder().decode(ServiceStatus.self, from: Data(#"{"state":"idle","pid":3196,"detail":""}"#.utf8))
+        XCTAssertEqual(older, ServiceStatus(state: .idle, detail: "", pid: 3196))
+        XCTAssertNil(older.serial)
+        let streaming = ServiceStatus(state: .streaming, detail: "SM_S918B", serial: "PHONE_A", pid: 7)
+        XCTAssertEqual(try JSONDecoder().decode(ServiceStatus.self, from: JSONEncoder().encode(streaming)), streaming)
     }
 }
 

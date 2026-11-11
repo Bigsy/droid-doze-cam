@@ -14,7 +14,7 @@ This is a list of priorities, not a release schedule.
 ## Next priorities
 
 1. Validate the current source with a full build and signed camera installation.
-2. Test upgrades and a clean Mac installation of the release ZIP.
+2. Test upgrades and a clean Mac installation of the release DMG.
 3. Expand device coverage, reconnect testing, receiving apps and longer sessions.
 4. Improve setup diagnostics based on reproducible user reports.
 

@@ -26,7 +26,8 @@ The lease-file CLI test checks on-demand dispatch and termination. Actual test-p
 - Check frame pacing in a receiving app at 30 and 60 fps: motion stays even, with no skipped or bunched frames.
 - Confirm scrcpy 5.0.1 starts with the phone already locked and screen off, and recovers after USB reconnect and encoder/session resets.
 - Compare `droiddozecam cameras --json` with the phone's actual capture modes. Test Automatic and explicit source sizes, 30/60 fps and supported high-speed modes.
-- Test camera zoom at both ends of the reported range, torch on/off and available H.264 encoders. Confirm setting changes restart capture, a camera change resets lens-specific controls, and different phones keep separate settings.
+- Test camera zoom at both ends of the reported range, torch on/off and available H.264 encoders. Confirm zoom and torch change on the running picture with the phone still locked and dark, other setting changes restart capture, a camera change resets lens-specific controls, and different phones keep separate settings.
+- With two phones set up, confirm the service uses whichever is plugged in, prefers the one set up last when both are, refuses a phone that was never set up, and keeps a running call on its phone.
 - Test USB disconnect/reconnect, multiple consumers, camera-app crashes and a longer session.
 - Test the notarized DMG on a clean Apple Silicon Mac, leaving quarantine intact.
 - Record additional Android devices before expanding compatibility claims; Intel, iPhone and UVC paths remain unverified here.
