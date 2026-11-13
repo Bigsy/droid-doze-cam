@@ -1,12 +1,14 @@
 // swift-tools-version: 5.9
 import PackageDescription
 
+var dependencies: [Package.Dependency] = []
 var products: [Product] = [.library(name: "DroidDozeCamCore", targets: ["DroidDozeCamCore"])]
 var targets: [Target] = [
     .target(name: "DroidDozeCamCore"),
     .testTarget(name: "DroidDozeCamCoreTests", dependencies: ["DroidDozeCamCore"])
 ]
 #if os(macOS)
+dependencies.append(.package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.1"))
 products += [
     .executable(name: "droiddozecam", targets: ["droiddozecam"]),
     .executable(name: "DroidDozeCamCameraExtension", targets: ["DroidDozeCamCameraExtension"])
@@ -20,7 +22,8 @@ targets += [
     .target(name: "DroidDozeCamSyphon", publicHeadersPath: "include", cSettings: [.unsafeFlags(["-fobjc-arc"])], linkerSettings: [
         .linkedFramework("Foundation"), .linkedFramework("AppKit"), .linkedFramework("Metal"), .linkedFramework("CoreVideo")
     ]),
-    .executableTarget(name: "droiddozecam", dependencies: ["DroidDozeCamCore", "DroidDozeCamMedia", "DroidDozeCamSyphon"], linkerSettings: [
+    .executableTarget(name: "droiddozecam", dependencies: ["DroidDozeCamCore", "DroidDozeCamMedia", "DroidDozeCamSyphon", .product(name: "Sparkle", package: "Sparkle")], linkerSettings: [
+        .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"]),
         .linkedFramework("AVFoundation"), .linkedFramework("CoreMediaIO"),
         .linkedFramework("SystemExtensions"), .linkedFramework("AppKit"),
         .linkedFramework("VideoToolbox"), .linkedFramework("Security")
@@ -28,8 +31,9 @@ targets += [
     .executableTarget(name: "DroidDozeCamCameraExtension", dependencies: ["DroidDozeCamCore", "DroidDozeCamMedia"], linkerSettings: [
         .linkedFramework("CoreMediaIO"), .linkedFramework("IOKit"), .linkedFramework("Security")
     ]),
-    .testTarget(name: "DroidDozeCamMediaTests", dependencies: ["DroidDozeCamMedia", "DroidDozeCamCore"])
+    .testTarget(name: "DroidDozeCamMediaTests", dependencies: ["DroidDozeCamMedia", "DroidDozeCamCore"]),
+    .testTarget(name: "DroidDozeCamAppTests", dependencies: ["droiddozecam", "DroidDozeCamCore"])
 ]
 #endif
 
-let package = Package(name: "DroidDozeCam", platforms: [.macOS(.v13)], products: products, targets: targets)
+let package = Package(name: "DroidDozeCam", platforms: [.macOS(.v13)], products: products, dependencies: dependencies, targets: targets)

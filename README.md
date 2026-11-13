@@ -64,6 +64,12 @@ The service defaults to 1080p with a maximum of 60 fps. It requests 30 fps when 
 
 To remove the camera and login service, choose **Settings → Setup → Remove Camera Setup…**. Once macOS has deactivated the extension (restart if requested), remove the app from `/Applications`.
 
+### App updates
+
+Choose **Check for Updates…** from the menu, or enable optional daily checks in **Settings → Updates**. Like Whispr Lite, DroidDozeCam uses [Sparkle](https://sparkle-project.org/documentation/) to verify signed updates from GitHub Releases, replace the app and relaunch. You choose when to install. Close the preview and stop using the camera before updating. Saved phone settings and downloaded ADB are retained.
+
+The app stops its login service for installation, then restores it and requests the updated camera extension on relaunch. If another app keeps the previous extension open, it stays available; quit camera apps and reopen DroidDozeCam to finish. Follow any macOS approval or restart request. Older builds need one manual installation of a release containing the updater. See [release publishing](docs/RELEASE.md#app-update-feed).
+
 ## How it works
 
 DroidDozeCam uses ADB to run a temporary, checksum-verified [scrcpy 5.0.1](https://github.com/Genymobile/scrcpy) camera helper on the phone. It is copied automatically for capture and removed on normal shutdown; **no Android app is installed**. The Mac decodes the USB video, applies image adjustments, and supplies frames to its Core Media I/O camera extension.

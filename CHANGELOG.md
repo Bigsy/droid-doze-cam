@@ -2,6 +2,11 @@
 
 User-facing changes are recorded here. The initial release is a developer preview, distributed as a signed and notarized Apple Silicon DMG.
 
+## 0.1.1
+
+- Add Sparkle app updates from signed GitHub release feeds, with manual checks and optional daily checks in Settings.
+- Preserve the login service across updates and recover camera-extension upgrades before starting the menu UI.
+
 ## DroidDozeCam fork
 
 ### Release packaging

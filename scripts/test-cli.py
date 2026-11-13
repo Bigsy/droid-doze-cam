@@ -30,8 +30,8 @@ def passed(name):
     print(f"PASS: {name}", flush=True)
 
 
-assert run(["version"]).stdout.strip() == "0.1.0"
-assert run(["--version"]).stdout.strip() == "0.1.0"
+assert run(["version"]).stdout.strip() == "0.1.1"
+assert run(["--version"]).stdout.strip() == "0.1.1"
 passed("version and --version")
 help_text = run(["help"]).stdout
 assert "droiddozecam probe" in help_text and "droiddozecam serve" in help_text and "--syphon" in help_text

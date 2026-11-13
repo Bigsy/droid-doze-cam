@@ -28,6 +28,10 @@ The release app can download official Android SDK Platform-Tools 37.0.1 from Goo
 Official distribution: https://developer.android.com/tools/releases/platform-tools
 Homebrew cask: https://formulae.brew.sh/cask/android-platform-tools
 
+## Sparkle (bundled)
+
+App updates use [Sparkle 2.10.1](https://github.com/sparkle-project/Sparkle), distributed under its permissive license and third-party notices. The app bundles the complete Sparkle framework, updater helpers, and the upstream license as `Contents/Resources/Sparkle-LICENSE.txt`. The update feed and release archives use a separate Ed25519 signing key; no private signing material is bundled.
+
 ## Apple frameworks and SDK
 
 AVFoundation, CoreMediaIO, CoreMedia, CoreVideo, VideoToolbox, CoreImage, Metal, IOSurface, AppKit, Security, SystemExtensions and IOKit are Apple system frameworks. They are linked, not distributed by this source archive. Use Xcode/macOS SDK under Apple's applicable agreements.

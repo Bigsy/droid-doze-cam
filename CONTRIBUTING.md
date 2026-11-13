@@ -41,7 +41,7 @@ The bundle builder copies the ICNS and sets `CFBundleIconFile`; bundle tests ver
 
 ## Versioning and releases
 
-Use semantic versioning for published releases. The current source version is `0.1.0`; no stable release is advertised.
+Use semantic versioning for published releases. The current source version is `0.1.1`; no stable release is advertised.
 
 When changing versions, keep `Constants.version` in `Configuration.swift`, the bundle version in `scripts/make-bundles.py`, and `scripts/test-cli.py` consistent. `BUILD_NUMBER` is the independent macOS bundle build counter.
 

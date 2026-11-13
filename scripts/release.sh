@@ -38,5 +38,9 @@ export ARCHS=arm64 RELEASE_BUILD=1 SCRCPY_SERVER SCRCPY_LICENSE
 "$ROOT/scripts/build.sh" --signed
 "$ROOT/scripts/notarize.sh"
 "$ROOT/scripts/package-dmg.sh"
+python3 "$ROOT/scripts/sparkle_updates.py" --app "$ROOT/dist/DroidDozeCam.app" \
+  --dmg "$ROOT/dist/DroidDozeCam-macos-arm64.dmg" --output "$ROOT/dist/appcast.xml" \
+  --account "${SPARKLE_ACCOUNT:-com.hedworth.droiddozecam}"
 
 echo "Release DMG: dist/DroidDozeCam-macos-arm64.dmg (checksum: dist/SHA256SUMS.txt)"
+echo "Upload the DMG to its versioned GitHub release, then publish dist/appcast.xml unchanged as appcast.xml on main."

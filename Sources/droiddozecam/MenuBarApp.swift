@@ -5,7 +5,9 @@ import DroidDozeCamCore
 final class MenuBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuItemValidation {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let setup = CameraSetup()
-    private lazy var settings = CameraSettingsWindow(setup: setup)
+    private let updater = AppUpdater()
+    private lazy var settings = CameraSettingsWindow(setup: setup, updater: updater)
+    private let updateItem = NSMenuItem(title: "Check for Updates…", action: nil, keyEquivalent: "")
     private let serviceState = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let serviceDetail = NSMenuItem(title: "", action: nil, keyEquivalent: "")
     private let mirrorItem = NSMenuItem(title: "Mirror", action: #selector(toggleMirror), keyEquivalent: "")
@@ -51,6 +53,9 @@ final class MenuBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuI
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settingsItem.target = self
         menu.addItem(settingsItem)
+        updateItem.target = updater
+        updateItem.action = #selector(AppUpdater.checkForUpdates)
+        menu.addItem(updateItem)
         menu.addItem(.separator())
         let quitItem = NSMenuItem(title: "Quit DroidDozeCam", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
@@ -63,6 +68,7 @@ final class MenuBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuI
         statusTimer = timer
         updateServiceStatus()
         settings.show(setupTab: setup.needsFirstRunSetup)
+        updater.start()
     }
 
     /// Opening DroidDozeCam.app again while the menu runs.
@@ -97,7 +103,22 @@ final class MenuBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuI
         zoomControl.isEnabled = menuPhone != nil
     }
 
-    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool { menuItem !== torchItem || menuPhone != nil }
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem === updateItem { return updater.canCheck }
+        return menuItem !== torchItem || menuPhone != nil
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard updater.isInstalling else { return .terminateNow }
+        do { try updater.maintenance.prepare(); return .terminateNow }
+        catch {
+            let alert = NSAlert()
+            alert.messageText = "Update paused"
+            alert.informativeText = error.localizedDescription
+            alert.runModal()
+            return .terminateCancel
+        }
+    }
 
     @objc private func toggleMirror() { writeImage(mirror: !store.read().mirror) }
     @objc private func toggleBlur() { writeImage(backgroundBlur: !store.read().backgroundBlur) }
@@ -177,6 +198,10 @@ final class MenuBarApp: NSObject, NSApplicationDelegate, NSMenuDelegate, NSMenuI
 
 @MainActor
 private final class CameraSettingsWindow: NSObject, NSWindowDelegate {
+    private let updater: AppUpdater
+    private let automaticUpdates = NSButton(checkboxWithTitle: "Automatically check for updates", target: nil, action: nil)
+    private let checkUpdates = NSButton(title: "Check for Updates…", target: nil, action: nil)
+    private let updateDetail = NSTextField(wrappingLabelWithString: "")
     private struct CameraChoice {
         let title: String
         let facing: String
@@ -223,8 +248,9 @@ private final class CameraSettingsWindow: NSObject, NSWindowDelegate {
     private let blurStrength = NSSlider(value: 24, minValue: Double(CameraTransform.blurRadii.lowerBound),
                                         maxValue: Double(CameraTransform.blurRadii.upperBound), target: nil, action: nil)
 
-    init(setup: CameraSetup) {
+    init(setup: CameraSetup, updater: AppUpdater) {
         self.setup = setup
+        self.updater = updater
         previewHeight = preview.heightAnchor.constraint(equalToConstant: 0)
         super.init()
         window.title = "DroidDozeCam Settings"
@@ -333,6 +359,18 @@ private final class CameraSettingsWindow: NSObject, NSWindowDelegate {
         addTab("Setup", views: [setupHeading, setupGuidance, readiness, setupButtons, divider,
                                heading("ADB on this Mac"), adbButtons, heading("Maintenance"), maintenance])
 
+        checkUpdates.target = updater
+        checkUpdates.action = #selector(AppUpdater.checkForUpdates)
+        automaticUpdates.target = self
+        automaticUpdates.action = #selector(toggleAutomaticUpdates)
+        let releases = NSButton(title: "GitHub Releases", target: self, action: #selector(openReleases))
+        let updateButtons = NSStackView(views: [checkUpdates, releases])
+        updateButtons.spacing = 10
+        updateDetail.textColor = .secondaryLabelColor
+        addTab("Updates", views: [heading("DroidDozeCam \(Constants.version)"), updateButtons, automaticUpdates, updateDetail])
+        updater.onChange = { [weak self] in self?.refreshUpdates() }
+        refreshUpdates()
+
         showPreview.target = self
         showPreview.action = #selector(togglePreview)
         showPreview.toolTip = "Shows the picture Mac apps receive. The phone camera runs while this is ticked."
@@ -356,6 +394,15 @@ private final class CameraSettingsWindow: NSObject, NSWindowDelegate {
         ])
     }
 
+    private func refreshUpdates() {
+        checkUpdates.isEnabled = updater.canCheck
+        automaticUpdates.isEnabled = updater.unavailableReason == nil
+        automaticUpdates.state = updater.automaticChecks ? .on : .off
+        updateDetail.stringValue = updater.unavailableReason ?? "Checks daily when enabled. You choose when to install. Close the preview and stop using the camera before updating. Settings and downloaded ADB are retained."
+    }
+
+    @objc private func toggleAutomaticUpdates() { updater.setAutomaticChecks(automaticUpdates.state == .on) }
+    @objc private func openReleases() { NSWorkspace.shared.open(URL(string: "https://github.com/Bigsy/droid-doze-cam/releases")!) }
     @objc private func togglePreview() { setPreview(showPreview.state == .on) }
 
     /// The window grows by the height of the picture and keeps its title bar where it is. The picture

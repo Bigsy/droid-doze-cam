@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Assemble native app/system-extension metadata. No signing secrets are generated."""
 import argparse
+import os
 import hashlib
 import pathlib
 import plistlib
 import re
 import shutil
+import sparkle_updates
 
 
 def write_plist(path, value):
@@ -39,7 +41,7 @@ def assemble(output, binary_dir, team, bundle_id, build_number, scrcpy_server=No
     group = team + "." + bundle_id
     extension = app / "Contents/Library/SystemExtensions" / (ext_id + ".systemextension")
     common = {"CFBundleDevelopmentRegion": "en", "CFBundleInfoDictionaryVersion": "6.0",
-              "CFBundleShortVersionString": "0.1.0", "CFBundleVersion": build_number,
+              "CFBundleShortVersionString": "0.1.1", "CFBundleVersion": build_number,
               "LSMinimumSystemVersion": "13.0", "NSHumanReadableCopyright": "Copyright 2026 DroidDozeCam contributors; upstream notices in LICENSE.txt"}
     host_info = dict(common, CFBundleIdentifier=bundle_id, CFBundleName="DroidDozeCam", CFBundleDisplayName="DroidDozeCam",
                      CFBundleExecutable="droiddozecam", CFBundlePackageType="APPL", CFBundleIconFile="DroidDozeCam.icns", LSUIElement=True,
@@ -64,6 +66,7 @@ def assemble(output, binary_dir, team, bundle_id, build_number, scrcpy_server=No
         shutil.copy2(root / "LICENSE", resources / "LICENSE.txt")
         shutil.copy2(root / "THIRD-PARTY-NOTICES.md", resources / "THIRD-PARTY-NOTICES.md")
     (app / "Contents/Resources").mkdir(parents=True, exist_ok=True)
+    sparkle_updates.configure(app / "Contents/Info.plist", os.environ)
     icon = pathlib.Path(__file__).resolve().parent.parent / "assets/DroidDozeCam.icns"
     shutil.copy2(icon, app / "Contents/Resources/DroidDozeCam.icns")
     if (scrcpy_server is None) != (scrcpy_license is None):

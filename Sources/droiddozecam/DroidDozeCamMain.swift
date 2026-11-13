@@ -109,6 +109,7 @@ struct DroidDozeCamMain {
     private static var manager: ExtensionManager?
     private static var preview: PreviewWindowController?
     private static var menuBar: MenuBarApp?
+    private static let updateMaintenance = AppUpdateMaintenance()
     private static var signals: [DispatchSourceSignal] = []
     static func main() {
         let c: Configuration
@@ -137,7 +138,7 @@ struct DroidDozeCamMain {
         }
         DispatchQueue.main.async {
             if c.command == "menu" {
-                menuBar = MenuBarApp()
+                updateMaintenance.recover { menuBar = MenuBarApp() }
             } else if c.command == "install-extension" || c.command == "uninstall-extension" {
                 let task = ExtensionManager(activate:c.command == "install-extension", force:c.force) { exit($0) }
                 manager = task

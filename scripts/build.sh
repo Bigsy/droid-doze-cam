@@ -74,6 +74,23 @@ python3 "$ROOT/scripts/make-bundles.py" --output "$STAGE/bundle" --binaries "$ST
   --scrcpy-server "$SCRCPY_SERVER" --scrcpy-license "$SCRCPY_LICENSE"
 APP="$STAGE/bundle/DroidDozeCam.app"
 EXT="$APP/Contents/Library/SystemExtensions/$BUNDLE_ID.camera.systemextension"
+# SwiftPM links Sparkle dynamically. Ship its complete framework and sign the helpers inside-out.
+SPARKLE="$ROOT/.build-${ARCHS%% *}/artifacts/sparkle/Sparkle"
+FRAMEWORK="$APP/Contents/Frameworks/Sparkle.framework"
+mkdir -p "$APP/Contents/Frameworks"
+ditto "$SPARKLE/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework" "$FRAMEWORK"
+cp "$SPARKLE/LICENSE" "$APP/Contents/Resources/Sparkle-LICENSE.txt"
+SPARKLE_IDENTITY=-
+SPARKLE_SIGN_FLAGS=()
+if [[ "$MODE" == --signed ]]; then
+  SPARKLE_IDENTITY="$SIGN_IDENTITY"
+  SPARKLE_SIGN_FLAGS=(--options runtime --timestamp)
+  if [[ "$SIGN_IDENTITY" == 'Apple Development:'* ]]; then SPARKLE_SIGN_FLAGS=(--options runtime --timestamp=none); fi
+fi
+for COMPONENT in XPCServices/Installer.xpc XPCServices/Downloader.xpc Autoupdate Updater.app; do
+  codesign --force --sign "$SPARKLE_IDENTITY" ${SPARKLE_SIGN_FLAGS[@]+"${SPARKLE_SIGN_FLAGS[@]}"} --preserve-metadata=entitlements "$FRAMEWORK/Versions/B/$COMPONENT"
+done
+codesign --force --sign "$SPARKLE_IDENTITY" ${SPARKLE_SIGN_FLAGS[@]+"${SPARKLE_SIGN_FLAGS[@]}"} "$FRAMEWORK"
 if [[ "$MODE" == --signed ]]; then
   if ! security cms -D -i "$HOST_PROFILE" > "$STAGE/host-profile.plist" 2>/dev/null; then
     openssl cms -verify -inform DER -in "$HOST_PROFILE" -noverify -out "$STAGE/host-profile.plist" 2>/dev/null
