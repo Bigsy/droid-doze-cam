@@ -57,18 +57,22 @@ struct AndroidTools {
 /// Phone zoom and torch for one capture session. The login service changes them here; a running Android
 /// capture sends them over scrcpy's control channel, and a reconnect starts from the latest values.
 final class LiveCameraControl: @unchecked Sendable {
-    private static let phonesLock = NSLock()
-    private static var phonesWithoutControl = Set<String>()
-    /// The control channel gave no video on this phone, so captures start without it until the service restarts.
+    private static let historyLock = NSLock()
+    private static var history = ControlChannelHistory()
+    /// The control channel repeatedly gave no video on this phone, so captures start without it until the service restarts.
     static func isDisabled(for serial: String) -> Bool {
-        phonesLock.lock(); defer { phonesLock.unlock() }
-        return phonesWithoutControl.contains(serial)
+        historyLock.lock(); defer { historyLock.unlock() }
+        return history.skips(serial)
     }
-    static func disable(for serial: String) {
-        phonesLock.lock(); defer { phonesLock.unlock() }
-        if phonesWithoutControl.insert(serial).inserted {
+    static func recordFailure(for serial: String) {
+        historyLock.lock(); defer { historyLock.unlock() }
+        if history.recordFailure(serial) {
             log("Live zoom and torch are unavailable on this phone; changing them restarts capture.")
         }
+    }
+    static func recordSuccess(for serial: String) {
+        historyLock.lock(); defer { historyLock.unlock() }
+        history.recordSuccess(serial)
     }
 
     private let lock = NSLock()
@@ -131,15 +135,15 @@ final class AndroidCapture: CaptureSource {
         var connected = false, streamed = false
         do {
             try stream(c, control: control, cancellation: cancellation, onFrame: onFrame) { stage in
-                if stage == .connected { connected = true } else { streamed = true }
+                if stage == .connected { connected = true } else { streamed = true; LiveCameraControl.recordSuccess(for: serial) }
             }
         } catch {
             // The phone answered but sent no video with the control channel open. Start once without
-            // it; if that streams, later captures on this phone skip the channel.
+            // it; if that streams, the failure counts towards skipping the channel on this phone.
             guard connected, !streamed, !cancellation.isCancelled else { throw error }
             log("No video with live camera controls (\(error.localizedDescription)); starting without them.")
             try stream(c, control: nil, cancellation: cancellation, onFrame: onFrame) { stage in
-                if stage == .streaming { LiveCameraControl.disable(for: serial) }
+                if stage == .streaming { LiveCameraControl.recordFailure(for: serial) }
             }
         }
     }

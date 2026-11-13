@@ -42,3 +42,24 @@ public enum ScrcpyCameraControl {
         return ZoomPlan(zoomIn: zoomIn, steps: steps, result: result)
     }
 }
+
+/// Which phones capture without the control channel. A start with the channel open can give no video
+/// once because the phone is restarting or leaving USB, as it does several times during a system update,
+/// so a phone skips the channel only after it fails again with no start that streamed in between.
+public struct ControlChannelHistory {
+    public static let failuresBeforeSkipping = 2
+    private var failures: [String: Int] = [:]
+    public init() {}
+
+    public func skips(_ serial: String) -> Bool { failures[serial, default: 0] >= Self.failuresBeforeSkipping }
+
+    /// A start with the channel gave no video, then one without it streamed.
+    /// True when this failure is the one that makes the phone skip the channel.
+    public mutating func recordFailure(_ serial: String) -> Bool {
+        failures[serial, default: 0] += 1
+        return failures[serial] == Self.failuresBeforeSkipping
+    }
+
+    /// Video flowed with the channel open.
+    public mutating func recordSuccess(_ serial: String) { failures[serial] = nil }
+}

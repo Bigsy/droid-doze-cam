@@ -229,4 +229,25 @@ final class ScrcpyCameraControlTests: XCTestCase {
         check(0, 2, false, 0, 0)
         check(1, .nan, false, 0, 1)
     }
+
+    func testOneFailedStartNeverTurnsOffTheControlChannel() {
+        var history = ControlChannelHistory()
+        // A phone restarting for a system update fails one start, then streams with the channel again.
+        XCTAssertFalse(history.recordFailure("phone"))
+        XCTAssertFalse(history.skips("phone"))
+        history.recordSuccess("phone")
+        XCTAssertFalse(history.recordFailure("phone"))
+        XCTAssertFalse(history.skips("phone"))
+    }
+
+    func testRepeatedFailuresTurnOffTheChannelForThatPhoneOnly() {
+        var history = ControlChannelHistory()
+        XCTAssertFalse(history.recordFailure("phone"))
+        XCTAssertTrue(history.recordFailure("phone"))
+        XCTAssertTrue(history.skips("phone"))
+        XCTAssertFalse(history.skips("other"))
+        // Only the failure that turns it off reports it, so the log says so once.
+        XCTAssertFalse(history.recordFailure("phone"))
+        XCTAssertTrue(history.skips("phone"))
+    }
 }

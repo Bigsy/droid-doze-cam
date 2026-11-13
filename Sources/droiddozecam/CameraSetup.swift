@@ -220,7 +220,10 @@ final class CameraSetup: NSObject {
                 } else if devices.contains(where: { $0.state == "unauthorized" }) {
                     phoneDetail = "Allow USB debugging on your phone"
                 } else if let other = usb.first(where: { $0.state == "device" }) {
-                    phoneDetail = "\(other.model ?? "This phone") is new: choose Set Up Camera to use it"
+                    // A device that was never set up may have no camera, such as a tablet, so name the
+                    // missing phone first rather than suggest setting up whatever is plugged in.
+                    let missing = known.count == 1 ? "Your phone isn't connected" : "None of your phones is connected"
+                    phoneDetail = "\(missing) (\(other.model ?? "another device") isn't set up)"
                 }
             } catch { phoneDetail = "Could not check connection" }
         } else { phoneDetail = "Install ADB first" }
