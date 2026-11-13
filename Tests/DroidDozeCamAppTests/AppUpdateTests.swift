@@ -126,4 +126,53 @@ final class AppUpdateTests: XCTestCase {
             XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("pending-app-update.json").path))
         }
     }
+
+    func testApprovedBuildParserIgnoresOtherExtensionsAndInactiveVersions() {
+        let listing = """
+        *\t*\tTEAM\tdev.fixture.camera.extra (0.1.1/300)\tOther\t[activated enabled]
+        \t\tTEAM\tdev.fixture.camera (0.1.0/100)\tCamera\t[terminated waiting to uninstall on reboot]
+        *\t*\tTEAM\tdev.fixture.camera (0.1.1/200)\tCamera\t[activated enabled]
+        """
+        XCTAssertEqual(AppUpdateMaintenance.approvedExtensionBuild(in: listing, identifier: "dev.fixture.camera"), "200")
+        XCTAssertNil(AppUpdateMaintenance.approvedExtensionBuild(in: listing, identifier: "dev.missing.camera"))
+        XCTAssertNil(AppUpdateMaintenance.approvedExtensionBuild(in: "dev.fixture.camera (0.1.1/bad) [activated enabled]", identifier: "dev.fixture.camera"))
+    }
+
+    func testManualUpgradeDefersWhileCameraIsInUseAndKeepsRecoveryState() async throws {
+        try await fixture { directory in
+            try ServiceStatusFile(directory: directory).publish(ServiceStatus(state: .streaming, detail: "fixture"))
+            var stops = 0
+            var issues = 0
+            let maintenance = AppUpdateMaintenance(directory: directory, build: "200", installed: true,
+                identifier: "dev.fixture.camera", command: { _, args in
+                    if args.first == "bootout" { stops += 1 }
+                    return CommandResult(status: 0, text: "*\t*\tTEAM\tdev.fixture.camera (0.1.0/100)\tCamera\t[activated enabled]")
+                })
+            maintenance.onIssue = { _, _ in issues += 1 }
+            let finished = expectation(description: "manual update deferred")
+            maintenance.recover { finished.fulfill() }
+            await fulfillment(of: [finished], timeout: 2)
+            XCTAssertEqual(stops, 0)
+            XCTAssertEqual(issues, 1)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent("pending-app-update.json").path))
+        }
+    }
+
+    func testMatchingOrNewerInstalledExtensionNeedsNoRecovery() async throws {
+        try await fixture { directory in
+            for build in ["200", "300"] {
+                var mutations = 0
+                let maintenance = AppUpdateMaintenance(directory: directory, build: "200", installed: true,
+                    identifier: "dev.fixture.camera", command: { _, args in
+                        if args.first != "list" { mutations += 1 }
+                        return CommandResult(status: 0, text: "dev.fixture.camera (0.1.1/\(build)) Camera [activated enabled]")
+                    })
+                var finished = false
+                maintenance.recover { finished = true }
+                XCTAssertTrue(finished)
+                XCTAssertEqual(mutations, 0)
+                XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("pending-app-update.json").path))
+            }
+        }
+    }
 }

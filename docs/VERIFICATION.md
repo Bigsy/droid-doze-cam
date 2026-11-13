@@ -10,9 +10,19 @@ The upstream project separately recorded Android → native preview → Syphon �
 
 ## Current source review
 
+### 0.1.1 updater candidate — 13 November 2026
+
+The arm64 candidate builds and passes Developer ID signature verification, including Sparkle's nested helpers and the camera extension. The full local checks passed: 86 Swift tests, 10 bundle/update-tooling checks and 10 CLI integration checks. Update regression tests cover interrupted installs, service-restart failures, active-camera deferral, tab-separated extension listings and manual-upgrade detection.
+
+The installed app's Updates tab was checked visually. Its manual update check retrieved the published, signed empty feed and displayed “You're up to date.” The published XML was also downloaded and verified with Sparkle's native signing tool. A temporary app DMG passed native signed-feed generation and verification.
+
+The local installer preserved the running 0.1.0 camera extension because another app still held it open. On launch, the new app detected the older extension, waited for it to exit, then showed “Camera update waiting,” restored the login service and saved the retry state. The Settings window remained usable after dismissing the notice. Live extension replacement, an update between two notarized builds, notarization and release-DMG packaging remain pending. The 0.1.1 GitHub release is a draft without downloadable assets.
+
+### Earlier release checks
+
 The public cleanup includes module/executable renaming, stricter producer authentication, reduced duplicate startup checks, test-pattern support and updated camera status reporting. It also migrates to scrcpy 5.0.1, handles the new codec/session/packet headers, discovers camera modes and encoders, and adds per-phone source size, zoom, torch and encoder controls. Local checks on 24 October 2026 passed: the signed arm64 build, 57 core tests, 10 media tests, 5 bundle-tooling checks and 10 CLI integration checks. A development-signed camera extension was activated and appeared in the Mac camera list. A short USB probe with the connected Samsung SM_S938B discovered camera modes and H.264 encoders, and captured video through scrcpy 5.0.1 using hardware decoding.
 
-The release app and DMG are Developer ID signed, notarized by Apple and stapled. The DMG is mounted read-only during packaging to verify its embedded app and Applications shortcut. Fresh-Mac installation, end-to-end video calls with the distribution build, locked-screen regression checks and longer hardware sessions remain pending; the release is a prerelease.
+The 0.1.0 release app and DMG are Developer ID signed, notarized by Apple and stapled. The DMG is mounted read-only during packaging to verify its embedded app and Applications shortcut. Fresh-Mac installation, end-to-end video calls with the distribution build, locked-screen regression checks and longer hardware sessions remain pending; the release is a prerelease.
 
 `./scripts/test.sh` runs the Swift tests, bundle-tooling checks, syntax checks, an unsigned app build and CLI integration checks. It does not install or activate a camera extension. Builds and tests run locally; this repository has no hosted CI.
 

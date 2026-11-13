@@ -61,7 +61,7 @@ final class AppUpdater: NSObject, SPUUpdaterDelegate, NSMenuItemValidation {
 
     func updater(_ updater: SPUUpdater, didAbortWithError error: Error) {
         isInstalling = false
-        maintenance.recover { }
+        maintenance.recover(reconcileManualUpgrade: false) { }
     }
 }
 
@@ -121,9 +121,7 @@ final class AppUpdateMaintenance {
         }
         let loaded = try serviceLoaded()
         let extensions = try run("/usr/bin/systemextensionsctl", ["list"])
-        let approved = extensions.text.split(separator: "\n").contains {
-            $0.split(whereSeparator: \.isWhitespace).contains(Substring(identifier)) && $0.contains("[activated enabled]")
-        }
+        let approved = Self.approvedExtensionBuild(in: extensions.text, identifier: identifier) != nil
         let pending = Pending(previousBuild: build, restartService: loaded, replaceExtension: approved)
         try save(pending)
         if loaded {
@@ -137,11 +135,20 @@ final class AppUpdateMaintenance {
         }
     }
 
-    func recover(completion: @escaping () -> Void) {
-        guard FileManager.default.fileExists(atPath: marker.path) else { completion(); return }
+    func recover(reconcileManualUpgrade: Bool = true, completion: @escaping () -> Void) {
         do {
-            let pending = try JSONDecoder().decode(Pending.self, from: Data(contentsOf: marker))
             guard installed else { completion(); return }
+            if !FileManager.default.fileExists(atPath: marker.path) {
+                guard reconcileManualUpgrade else { completion(); return }
+                // Drag-and-drop upgrades have no Sparkle shutdown marker. Reconcile their approved
+                // extension too, before the settings UI or service attaches to the old camera.
+                let listing = try run("/usr/bin/systemextensionsctl", ["list"], allowFailure: true)
+                guard listing.status == 0,
+                      let previous = Self.approvedExtensionBuild(in: listing.text, identifier: identifier),
+                      previous.compare(build, options: .numeric) == .orderedAscending else { completion(); return }
+                try save(Pending(previousBuild: previous, restartService: false, replaceExtension: true))
+            }
+            let pending = try JSONDecoder().decode(Pending.self, from: Data(contentsOf: marker))
             Task { @MainActor [self] in
                 var pending = pending
                 if pending.previousBuild != build && pending.replaceExtension {
@@ -205,6 +212,18 @@ final class AppUpdateMaintenance {
 
     private func serviceLoaded() throws -> Bool {
         try run("/bin/launchctl", ["print", "\(domain)/\(label)"], allowFailure: true).status == 0
+    }
+
+    static func approvedExtensionBuild(in listing: String, identifier: String) -> String? {
+        for line in listing.split(separator: "\n") where line.contains("[activated enabled]") {
+            let fields = line.split(whereSeparator: \.isWhitespace)
+            guard let index = fields.firstIndex(of: Substring(identifier)), index + 1 < fields.count,
+                  let version = fields[index + 1].split(separator: "/").last else { continue }
+            let build = String(version).trimmingCharacters(in: CharacterSet(charactersIn: "()"))
+            guard build.range(of: "^[0-9]+(?:\\.[0-9]+){0,2}$", options: .regularExpression) != nil else { continue }
+            return build
+        }
+        return nil
     }
 
     private func save(_ pending: Pending) throws {

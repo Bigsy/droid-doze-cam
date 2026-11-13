@@ -6,6 +6,7 @@ User-facing changes are recorded here. The initial release is a developer previe
 
 - Add Sparkle app updates from signed GitHub release feeds, with manual checks and optional daily checks in Settings.
 - Preserve the login service across updates and recover camera-extension upgrades before starting the menu UI.
+- Reconcile the camera extension after a manual drag-and-drop app upgrade, deferring while camera apps are using it.
 
 ## DroidDozeCam fork
 
