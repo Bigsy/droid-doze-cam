@@ -10,13 +10,23 @@ The upstream project separately recorded Android → native preview → Syphon �
 
 ## Current source review
 
+### 0.1.1 release — 14 November 2026
+
+The app and Apple Silicon DMG are Developer ID signed, notarized, stapled and accepted by Gatekeeper. Packaging mounted the DMG read-only and verified its embedded app and Applications shortcut. The download from GitHub matched the packaged DMG byte-for-byte, and the published feed matches the signed generated XML.
+
+The final checks passed: 88 Swift tests, 10 bundle/update-tooling checks and 10 CLI integration checks. Recovery tests also cover carrying a deferred camera-extension upgrade and a failed service restart into a later app update, while rejecting malformed recovery data before stopping the service.
+
+A live Sparkle update passed between notarized builds `20261114102002` and `20261114102252`, both displaying version 0.1.1. The older app discovered the release, downloaded and verified it, installed it and relaunched. The installed build number changed to the release build, its notarization ticket validated, and the login service restarted. Fingerprint comparisons confirmed that camera settings, configured phones, the service configuration and downloaded ADB were preserved without recording their contents. A subsequent check displayed “You're up to date.”
+
+Another app retained the older 0.1.0 camera extension during this test. Recovery preserved that extension, restored the service, saved the pending upgrade and showed the expected waiting notice. Actual replacement after all camera clients exit, fresh-Mac installation, testing on a second Mac and a new end-to-end video call remain pending. This is still a developer preview.
+
 ### 0.1.1 updater candidate — 13 November 2026
 
 The arm64 candidate builds and passes Developer ID signature verification, including Sparkle's nested helpers and the camera extension. The full local checks passed: 86 Swift tests, 10 bundle/update-tooling checks and 10 CLI integration checks. Update regression tests cover interrupted installs, service-restart failures, active-camera deferral, tab-separated extension listings and manual-upgrade detection.
 
 The installed app's Updates tab was checked visually. Its manual update check retrieved the published, signed empty feed and displayed “You're up to date.” The published XML was also downloaded and verified with Sparkle's native signing tool. A temporary app DMG passed native signed-feed generation and verification.
 
-The local installer preserved the running 0.1.0 camera extension because another app still held it open. On launch, the new app detected the older extension, waited for it to exit, then showed “Camera update waiting,” restored the login service and saved the retry state. The Settings window remained usable after dismissing the notice. Live extension replacement, an update between two notarized builds, notarization and release-DMG packaging remain pending. The 0.1.1 GitHub release is a draft without downloadable assets.
+The local installer preserved the running 0.1.0 camera extension because another app still held it open. On launch, the new app detected the older extension, waited for it to exit, then showed “Camera update waiting,” restored the login service and saved the retry state. The Settings window remained usable after dismissing the notice. At this stage the release was a draft; the completed notarization, packaging and live update results are recorded above.
 
 ### Earlier release checks
 
