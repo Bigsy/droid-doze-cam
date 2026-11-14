@@ -95,7 +95,10 @@ final class AppUpdateTests: XCTestCase {
             await fulfillment(of: [recovered], timeout: 2)
             XCTAssertEqual(issues, 1)
             XCTAssertTrue(FileManager.default.fileExists(atPath: directory.appendingPathComponent("pending-app-update.json").path))
-            XCTAssertThrowsError(try maintenance.prepare(), "Do not overwrite unfinished recovery state")
+            XCTAssertNoThrow(try maintenance.prepare())
+            let data = try Data(contentsOf: directory.appendingPathComponent("pending-app-update.json"))
+            let state = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            XCTAssertEqual(state["restartService"] as? Bool, true, "Carry the failed restart into the next update")
         }
     }
 
@@ -173,6 +176,42 @@ final class AppUpdateTests: XCTestCase {
                 XCTAssertEqual(mutations, 0)
                 XCTAssertFalse(FileManager.default.fileExists(atPath: directory.appendingPathComponent("pending-app-update.json").path))
             }
+        }
+    }
+
+    func testAnotherAppUpdatePreservesDeferredExtensionAndStopsLoadedService() async throws {
+        try await fixture { directory in
+            let marker = directory.appendingPathComponent("pending-app-update.json")
+            try JSONSerialization.data(withJSONObject: ["previousBuild": "100", "restartService": false,
+                                                        "replaceExtension": true]).write(to: marker)
+            var stops = 0
+            let maintenance = AppUpdateMaintenance(directory: directory, build: "200", installed: true,
+                command: { _, args in
+                    if args.first == "bootout" { stops += 1 }
+                    return CommandResult(status: 0, text: "")
+                })
+            try maintenance.prepare()
+            let state = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: marker)) as? [String: Any])
+            XCTAssertEqual(state["previousBuild"] as? String, "100")
+            XCTAssertEqual(state["replaceExtension"] as? Bool, true)
+            XCTAssertEqual(state["restartService"] as? Bool, true)
+            XCTAssertEqual(stops, 1)
+        }
+    }
+
+    func testMalformedRecoveryStateNeverStopsServiceOrGetsOverwritten() async throws {
+        try await fixture { directory in
+            let marker = directory.appendingPathComponent("pending-app-update.json")
+            let data = Data("incomplete recovery".utf8)
+            try data.write(to: marker)
+            var commands = 0
+            let maintenance = AppUpdateMaintenance(directory: directory, command: { _, _ in
+                commands += 1
+                return CommandResult(status: 0, text: "")
+            })
+            XCTAssertThrowsError(try maintenance.prepare())
+            XCTAssertEqual(commands, 0)
+            XCTAssertEqual(try Data(contentsOf: marker), data)
         }
     }
 }

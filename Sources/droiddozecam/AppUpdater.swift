@@ -116,13 +116,16 @@ final class AppUpdateMaintenance {
 
     func prepare() throws {
         try requireIdle()
-        guard !FileManager.default.fileExists(atPath: marker.path) else {
-            throw DroidDozeCamError.message("Reopen DroidDozeCam to finish the previous camera update first.")
-        }
+        // A camera app may retain an older extension across several host app updates. Carry that
+        // recovery forward rather than making every later app update wait for the old process.
+        let previous = FileManager.default.fileExists(atPath: marker.path)
+            ? try JSONDecoder().decode(Pending.self, from: Data(contentsOf: marker)) : nil
         let loaded = try serviceLoaded()
         let extensions = try run("/usr/bin/systemextensionsctl", ["list"])
         let approved = Self.approvedExtensionBuild(in: extensions.text, identifier: identifier) != nil
-        let pending = Pending(previousBuild: build, restartService: loaded, replaceExtension: approved)
+        let pending = Pending(previousBuild: previous?.previousBuild ?? build,
+                              restartService: loaded || previous?.restartService == true,
+                              replaceExtension: approved || previous?.replaceExtension == true)
         try save(pending)
         if loaded {
             do {
