@@ -1,6 +1,20 @@
-<?xml version="1.0" encoding="utf-8" standalone="yes"?><!-- sparkle-sign-warning:
+<?xml version="1.0" standalone="yes"?><!-- sparkle-sign-warning:
 IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
---><rss version="2.0"><channel><title>DroidDozeCam</title></channel></rss><!-- sparkle-signatures:
-edSignature: 9Dwjluuw4tjksh2CBt6lBv0msKkbJnSCF1x1546hYFNKeMCtKXFW0AL02T9VXxSevlSy937vqVC3BZYQ7gT8Cw==
-length: 362
+--><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>DroidDozeCam</title>
+        <item>
+            <title>0.1.1</title>
+            <pubDate>Sat, 14 Nov 2026 10:24:05 +0000</pubDate>
+            <link>https://github.com/Bigsy/droid-doze-cam/releases/tag/v0.1.1</link>
+            <sparkle:version>20261114102252</sparkle:version>
+            <sparkle:shortVersionString>0.1.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/Bigsy/droid-doze-cam/releases/download/v0.1.1/DroidDozeCam-macos-arm64.dmg" length="4407526" type="application/octet-stream" sparkle:edSignature="I7oYIbGdu4E/kMHtJvtGW2V4DYsCK+8wAFM9W3rxwvpfuD13mniF2uNGFnFvmcZ1fvidePflZG3++ZtB8cuNAA=="></enclosure>
+        </item>
+    </channel>
+</rss><!-- sparkle-signatures:
+edSignature: HLn3aHBB0PmXPBTg31jDybVEBKJ3Q2Q6y4IO2MG/wK5awzWbSKn3D71H5bHiiQS5WhiWAibMMd90p0n2XvaSBg==
+length: 1235
 -->
